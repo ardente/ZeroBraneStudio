@@ -410,7 +410,7 @@ loadPackages()
 
 for _, file in ipairs({
     "markup", "settings", "singleinstance", "iofilters",
-    "gui", "filetree", "output", "debugger", "package",
+    "package", "gui", "filetree", "output", "debugger",
     "editor", "findreplace", "commands", "autocomplete", "shellbox",
     "menu_file", "menu_edit", "menu_search",
     "menu_view", "menu_project", "menu_tools", "menu_help",
@@ -441,7 +441,13 @@ SettingsRestoreView()
 do
   for _, fileName in ipairs(filenames) do
     if fileName ~= "--" then
-      LoadFile(fileName, nil, true)
+      if wx.wxDirExists(fileName) then
+        local dir = wx.wxFileName.DirName(fileName)
+        dir:Normalize() -- turn into absolute path if needed
+        ProjectUpdateProjectDir(dir:GetFullPath())
+      else
+        LoadFile(fileName, nil, true)
+      end
     end
   end
 

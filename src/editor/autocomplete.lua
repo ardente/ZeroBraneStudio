@@ -426,10 +426,12 @@ local function getAutoCompApiList(childs,fragment,method)
     if not wlist then
       wlist = " "
       for i,v in pairs(childs) do
+        -- in some cases (tip.finfo), v may be a string; check for that first.
         -- if a:b typed, then value (type == "value") not allowed
         -- if a.b typed, then method (type == "method") not allowed
-        if ((method and v.type ~= "value") or (not method and v.type ~= "method"))
-        and v.type then
+        if type(v) ~= 'table' or (v.type and
+           ((method and v.type ~= "value")
+         or (not method and v.type ~= "method"))) then
           wlist = wlist..i.." "
         end
       end
@@ -459,10 +461,12 @@ local function getAutoCompApiList(childs,fragment,method)
 
   local sub = strategy == 1
   for key,v in pairs(childs) do
+    -- in some cases (tip.finfo), v may be a string; check for that first.
     -- if a:b typed, then value (type == "value") not allowed
     -- if a.b typed, then method (type == "method") not allowed
-    if ((method and v.type ~= "value") or (not method and v.type ~= "method"))
-    and v.type then
+    if type(v) ~= 'table' or (v.type and
+       ((method and v.type ~= "value")
+     or (not method and v.type ~= "method"))) then
       local used = {}
       --
       local kl = key:lower()
@@ -518,10 +522,9 @@ function CreateAutoCompList(editor,key)
   if not (progress) then return end
 
   if (tab == ac) then
-    local _, krest = rest:match("([%w_]+)["..sep.."]([%w_]+)%s*$")
+    local _, krest = rest:match("([%w_]+)["..sep.."]([%w_]*)%s*$")
     if (krest) then
-      if (#krest < 3) then return end
-      tab = tip.finfo
+      tab = #krest >= (ide.config.acandtip.startat or 2) and tip.finfo or {}
       rest = krest:gsub("[^%w_]","")
     else
       rest = rest:gsub("[^%w_]","")
@@ -536,7 +539,7 @@ function CreateAutoCompList(editor,key)
   -- only if api search couldnt descend
   -- ie we couldnt find matching sub items
   local dw = ""
-  if (tab == ac and last and #last >= (ide.config.acandtip.startat or 2)) then
+  if (last and #last >= (ide.config.acandtip.startat or 2)) then
     last = last:lower()
     if dynamicwords[last] then
       local list = dynamicwords[last]
@@ -635,5 +638,5 @@ function CreateAutoCompList(editor,key)
   -- concat final, list complete first
   local li = (compstr .. dw)
   
-  return li ~= "" and (#li > 1024 and li:sub(1,1024).."..." or li)
+  return li ~= "" and (#li > 1024 and li:sub(1,1024).."..." or li) or nil
 end

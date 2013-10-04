@@ -12,7 +12,9 @@ local notebook = ide.frame.notebook
 local funclist = ide.frame.toolBar.funclist
 local edcfg = ide.config.editor
 local styles = ide.config.styles
-local projcombobox = ide.frame.projpanel.projcombobox
+
+local DEFAULT_STYLE = 32
+local margin = { LINENUMBER = 0, MARKER = 1, FOLD = 2 }
 
 -- ----------------------------------------------------------------------------
 -- Update the statusbar text of the frame using the given editor.
@@ -122,6 +124,20 @@ local function isFileAlteredOnDisk(editor)
       end
     end
   end
+end
+
+local function navigateToPosition(editor, fromPosition, toPosition, length)
+  table.insert(editor.jumpstack, fromPosition)
+  editor:GotoPos(toPosition)
+  if length then
+    editor:SetAnchor(toPosition + length)
+  end
+end
+
+local function navigateBack(editor)
+  if #editor.jumpstack == 0 then return end
+  local pos = table.remove(editor.jumpstack)
+  editor:GotoPos(pos)
 end
 
 -- ----------------------------------------------------------------------------
@@ -580,6 +596,8 @@ function CreateEditor()
 
   editor.matchon = false
   editor.assignscache = false
+  editor.autocomplete = false
+  editor.jumpstack = {}
 
   editor:SetBufferedDraw(not ide.config.hidpi and true or false)
   editor:StyleClearAll()
@@ -609,20 +627,20 @@ function CreateEditor()
 
   editor:SetVisiblePolicy(wxstc.wxSTC_VISIBLE_STRICT, 3)
 
-  editor:SetMarginWidth(0, editor:TextWidth(32, "99999_")) -- line # margin
+  editor:SetMarginWidth(margin.LINENUMBER, editor:TextWidth(DEFAULT_STYLE, "99999_"))
 
-  editor:SetMarginWidth(1, 16) -- marker margin
-  editor:SetMarginType(1, wxstc.wxSTC_MARGIN_SYMBOL)
-  editor:SetMarginSensitive(1, true)
+  editor:SetMarginWidth(margin.MARKER, 16)
+  editor:SetMarginType(margin.MARKER, wxstc.wxSTC_MARGIN_SYMBOL)
+  editor:SetMarginSensitive(margin.MARKER, true)
 
   editor:MarkerDefine(StylesGetMarker("currentline"))
   editor:MarkerDefine(StylesGetMarker("breakpoint"))
 
   if ide.config.editor.fold then
-    editor:SetMarginWidth(2, 16) -- fold margin
-    editor:SetMarginType(2, wxstc.wxSTC_MARGIN_SYMBOL)
-    editor:SetMarginMask(2, wxstc.wxSTC_MASK_FOLDERS)
-    editor:SetMarginSensitive(2, true)
+    editor:SetMarginWidth(margin.FOLD, 16)
+    editor:SetMarginType(margin.FOLD, wxstc.wxSTC_MARGIN_SYMBOL)
+    editor:SetMarginMask(margin.FOLD, wxstc.wxSTC_MASK_FOLDERS)
+    editor:SetMarginSensitive(margin.FOLD, true)
   end
 
   editor:SetFoldFlags(wxstc.wxSTC_FOLDFLAG_LINEBEFORE_CONTRACTED +
@@ -737,7 +755,6 @@ function CreateEditor()
       -- auto-indent
       local LF = string.byte("\n")
       local ch = event:GetKey()
-      local eol = editor:GetEOLMode()
       local pos = editor:GetCurrentPos()
       local line = editor:GetCurrentLine()
       local linetx = editor:GetLine(line)
@@ -795,8 +812,7 @@ function CreateEditor()
       elseif ide.config.autocomplete then -- code completion prompt
         local trigger = linetxtopos:match("["..editor.spec.sep.."%w_]+$")
         if (trigger and (#trigger > 1 or trigger:match("["..editor.spec.sep.."]"))) then
-          ide.frame:AddPendingEvent(wx.wxCommandEvent(
-            wx.wxEVT_COMMAND_MENU_SELECTED, ID_AUTOCOMPLETE))
+          editor.autocomplete = true
         end
       end
     end)
@@ -832,12 +848,6 @@ function CreateEditor()
   editor:Connect(wxstc.wxEVT_STC_DWELLEND,
     function (event)
       if editor:CallTipActive() then editor:CallTipCancel() end
-      event:Skip()
-    end)
-
-  editor:Connect(wx.wxEVT_SET_FOCUS,
-    function (event)
-      PackageEventHandle("onEditorFocusSet", editor)
       event:Skip()
     end)
 
@@ -927,6 +937,12 @@ function CreateEditor()
         firstvisible)
       MarkupStyle(editor,minupdated or firstline,lastline)
       editor.ev = {}
+
+      -- show auto-complete if needed
+      if editor.autocomplete then
+        EditorAutoComplete(editor)
+        editor.autocomplete = false
+      end
     end)
 
   editor:Connect(wx.wxEVT_LEFT_DOWN,
@@ -935,6 +951,19 @@ function CreateEditor()
         local position = editor:PositionFromPointClose(event:GetX(),event:GetY())
         if position ~= wxstc.wxSTC_INVALID_POSITION then
           if MarkupHotspotClick(position, editor) then return end
+        end
+      end
+
+      if event:ControlDown() and event:AltDown()
+      -- ide.wxver >= "2.9.5"; fix after GetModifiers is added to wxMouseEvent in wxlua
+      and not event:ShiftDown() and not event:MetaDown() then
+        local point = event:GetPosition()
+        local pos = editor:PositionFromPointClose(point.x, point.y)
+        local value = pos ~= wxstc.wxSTC_INVALID_POSITION and getValAtPosition(editor, pos) or nil
+        local instances = value and indicateFindInstances(editor, value, pos+1)
+        if instances and instances[0] then
+          navigateToPosition(editor, pos, instances[0]-1, #value)
+          return
         end
       end
       event:Skip()
@@ -956,6 +985,7 @@ function CreateEditor()
       event:Skip()
       if inhandler or ide.exitingProgram then return end
       inhandler = true
+      PackageEventHandle("onEditorFocusSet", editor)
       isFileAlteredOnDisk(editor)
       inhandler = false
     end)
@@ -1018,6 +1048,8 @@ function CreateEditor()
       and keycode == ('T'):byte() and mod == wx.wxMOD_CONTROL then
         ide.frame:AddPendingEvent(wx.wxCommandEvent(
           wx.wxEVT_COMMAND_MENU_SELECTED, ID_SHOWTOOLTIP))
+      elseif mod == wx.wxMOD_ALT and keycode == wx.WXK_LEFT then
+        navigateBack(editor)
       else
         if ide.osname == 'Macintosh' and mod == wx.wxMOD_META then
           return -- ignore a key press if Command key is also pressed
@@ -1060,6 +1092,12 @@ function CreateEditor()
         end
       end
 
+      event:Skip()
+    end)
+
+  editor:Connect(wxstc.wxEVT_STC_ZOOM,
+    function(event)
+      editor:SetMarginWidth(margin.LINENUMBER, editor:TextWidth(DEFAULT_STYLE, "99999_"))
       event:Skip()
     end)
 
@@ -1117,8 +1155,7 @@ function CreateEditor()
   editor:Connect(ID_GOTODEFINITION, wx.wxEVT_COMMAND_MENU_SELECTED,
     function(event)
       if value and instances[0] then
-        editor:GotoPos(instances[0]-1)
-        editor:SetAnchor(instances[0]-1+#value)
+        navigateToPosition(editor, editor:GetCurrentPos(), instances[0]-1, #value)
       end
     end)
 

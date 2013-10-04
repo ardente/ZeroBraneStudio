@@ -79,7 +79,7 @@ function LoadFile(filePath, editor, file_must_exist, skipselection)
   if file_text and #file_text > 0 and #(editor:GetText()) == 0
   and (editor.spec ~= ide.specs.none or not isBinary(file_text)) then
     local replacement, invalid = "\022"
-    file_text, invalid = fixUTF8(file_text, replacement)
+    file_text, invalid = FixUTF8(file_text, replacement)
     if #invalid > 0 then
       editor:AppendText(file_text)
       local lastline = nil
@@ -248,6 +248,16 @@ function SaveFileAs(editor)
   if fileDialog:ShowModal() == wx.wxID_OK then
     local filePath = fileDialog:GetPath()
 
+    -- first check if there is another tab with the same name and close it
+    local existing
+    local fileName = wx.wxFileName(filePath)
+    for _, document in pairs(ide.openDocuments) do
+      if document.filePath and fileName:SameAs(wx.wxFileName(document.filePath)) then
+        existing = document.index
+        break
+      end
+    end
+
     if SaveFile(editor, filePath) then
       SetEditorSelection() -- update title of the editor
       FileTreeMarkSelected(filePath)
@@ -259,6 +269,16 @@ function SaveFileAs(editor)
         MarkupStyle(editor)
       end
       saved = true
+
+      if existing then
+        -- save the current selection as it may change after closing
+        local current = notebook:GetSelection()
+        ClosePage(existing)
+        -- restore the selection if it changed
+        if current ~= notebook:GetSelection() then
+          notebook:SetSelection(current)
+        end
+      end
     end
   end
 

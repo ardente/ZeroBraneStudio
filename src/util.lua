@@ -252,7 +252,10 @@ end
 
 function FileRename(file1, file2) return wx.wxRenameFile(file1, file2) end
 
-function FileCopy(file1, file2) return wx.wxCopyFile(file1, file2) end
+function FileCopy(file1, file2)
+  local log = wx.wxLogNull() -- disable error reporting; will report as needed
+  return wx.wxCopyFile(file1, file2)
+end
 
 TimeGet = pcall(require, "socket") and socket.gettime or os.clock
 
@@ -272,7 +275,7 @@ function pairsSorted(t, f)
   return iter
 end
 
-function fixUTF8(s, replacement)
+function FixUTF8(s, repl)
   local p, len, invalid = 1, #s, {}
   while p <= len do
     if     p == s:find("[%z\1-\127]", p) then p = p + 1
@@ -280,13 +283,17 @@ function fixUTF8(s, replacement)
     elseif p == s:find(       "\224[\160-\191][\128-\191]", p)
         or p == s:find("[\225-\236][\128-\191][\128-\191]", p)
         or p == s:find(       "\237[\128-\159][\128-\191]", p)
-        or p == s:find("[\238-\239][\128-\191][\128-\191]", p)
-        or p == s:find(       "\240[\144-\191][\128-\191]", p) then p = p + 3
-    elseif p == s:find("[\241-\243][\128-\191][\128-\191][\128-\191]", p)
+        or p == s:find("[\238-\239][\128-\191][\128-\191]", p) then p = p + 3
+    elseif p == s:find(       "\240[\144-\191][\128-\191][\128-\191]", p)
+        or p == s:find("[\241-\243][\128-\191][\128-\191][\128-\191]", p)
         or p == s:find(       "\244[\128-\143][\128-\191][\128-\191]", p) then p = p + 4
     else
-      s = s:sub(1, p-1)..replacement..s:sub(p+1)
+      local repl = type(repl) == 'function' and repl(s:sub(p,p)) or repl
+      s = s:sub(1, p-1)..repl..s:sub(p+1)
       table.insert(invalid, p)
+      -- adjust position/length as the replacement may be longer than one char
+      p = p + #repl
+      len = len + #repl - 1
     end
   end
   return s, invalid
@@ -300,6 +307,8 @@ function RequestAttention()
       local cmd = [[osascript -e 'tell application "%s" to activate']]
       wx.wxExecute(cmd:format(ide.editorApp:GetAppName()), wx.wxEXEC_ASYNC)
     elseif ide.osname == "Windows" then
+      frame:Raise() -- raise the window
+
       local winapi = require 'winapi'
       if winapi then
         local pid = winapi.get_current_pid()
@@ -309,10 +318,10 @@ function RequestAttention()
         end)
         if wins and #wins > 0 then
           -- found the window, now need to activate it:
-          -- send Alt key to the current window and then
-          -- bring our window to foreground (doesn't work without Alt pressed)
-          winapi.send_to_window(307)
-          wins[1]:set_foreground()
+          -- send some input to the window and then
+          -- bring our window to foreground (doesn't work without some input)
+          winapi.send_to_window(0x1B)
+          for _, w in ipairs(wins) do w:set_foreground() end
         end
       end
     end

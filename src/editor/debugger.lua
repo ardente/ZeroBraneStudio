@@ -30,12 +30,31 @@ local BREAKPOINT_MARKER_VALUE = 2^BREAKPOINT_MARKER
 
 local activate = {CHECKONLY = 1, NOREPORT = 2}
 
+local function serialize(value, options) return mobdebug.line(value, options) end
+
+local stackmaxlength = ide.config.debugger.stackmaxlength or 400
+local stackmaxnum = ide.config.debugger.stackmaxnum or 400
+local stackmaxlevel = ide.config.debugger.stackmaxlevel or 3
+local params = {comment = false, nocode = true, maxlevel = stackmaxlevel, maxnum = stackmaxnum}
+
+function fixUTF8(...)
+  local t = {...}
+  -- convert to escaped decimal code as these can only appear in strings
+  local function fix(s) return '\\'..string.byte(s) end
+  for i = 1, #t do
+    local text = t[i]:sub(1, stackmaxlength)..(#t[i] > stackmaxlength and '...' or '')
+    t[i] = FixUTF8(text, fix)
+  end
+  return (table.unpack or unpack)(t)
+end
+
 local function q(s) return s:gsub('([%(%)%.%%%+%-%*%?%[%^%$%]])','%%%1') end
 
 local function updateWatchesSync(num)
   local watchCtrl = debugger.watchCtrl
-  if watchCtrl and debugger.server and not debugger.running
-  and ide.frame.uimgr:GetPane("watchpanel"):IsShown()
+  local pane = ide.frame.uimgr:GetPane("watchpanel")
+  local shown = watchCtrl and (pane:IsOk() and pane:IsShown() or not pane:IsOk() and watchCtrl:IsShown())
+  if shown and debugger.server and not debugger.running
   and not debugger.scratchpad and not (debugger.options or {}).noeval then
     local bgcl = watchCtrl:GetBackgroundColour()
     local hicl = wx.wxColour(math.floor(bgcl:Red()*.9),
@@ -80,8 +99,9 @@ end
 
 local function updateStackSync()
   local stackCtrl = debugger.stackCtrl
-  if stackCtrl and debugger.server and not debugger.running
-  and ide.frame.uimgr:GetPane("stackpanel"):IsShown()
+  local pane = ide.frame.uimgr:GetPane("stackpanel")
+  local shown = stackCtrl and (pane:IsOk() and pane:IsShown() or not pane:IsOk() and stackCtrl:IsShown())
+  if shown and debugger.server and not debugger.running
   and not debugger.scratchpad then
     local stack, _, err = debugger.stack()
     if not stack or #stack == 0 then
@@ -93,7 +113,7 @@ local function updateStackSync()
     end
     stackCtrl:Freeze()
     stackCtrl:DeleteAllItems()
-    local params = {comment = false, nocode = true}
+
     local root = stackCtrl:AddRoot("Stack")
     stackItemValue = {} -- reset cache of items in the stack
     callData = {} -- reset call cache
@@ -114,13 +134,13 @@ local function updateStackSync()
       local text = func ..
         (call[4] == -1 and '' or " at line "..call[4]) ..
         (call[5] ~= "main" and call[5] ~= "Lua" and ''
-         or (call[3] > 0 and " (defined at "..call[2]..":"..call[3]..")"
-                          or " (defined in "..call[2]..")"))
+         or (call[3] > 0 and " (defined at "..call[7]..":"..call[3]..")"
+                          or " (defined in "..call[7]..")"))
 
       -- create the new tree item for this level of the call stack
       local callitem = stackCtrl:AppendItem(root, text, 0)
 
-      -- registed call data to added item
+      -- register call data to provide stack navigation
       callData[callitem:GetValue()] = { call[2], call[4] }
 
       -- add the local variables to the call stack item
@@ -130,9 +150,9 @@ local function updateStackSync()
 
         -- comment can be not necessarily a string for tables with metatables
         -- that provide its own __tostring method
-        local value, comment = val[1], tostring(val[2])
+        local value, comment = val[1], fixUTF8(tostring(val[2]))
         local text = ("%s = %s%s"):
-          format(name, mobdebug.line(value, params),
+          format(name, fixUTF8(serialize(value, params)),
                  simpleType[type(value)] and "" or ("  --[["..comment.."]]"))
         local item = stackCtrl:AppendItem(callitem, text, 1)
         if checkIfExpandable(value, item) then
@@ -142,9 +162,9 @@ local function updateStackSync()
 
       -- add the upvalues for this call stack level to the tree item
       for name,val in pairs(frame[3]) do
-        local value, comment = val[1], tostring(val[2])
+        local value, comment = val[1], fixUTF8(tostring(val[2]))
         local text = ("%s = %s%s"):
-          format(name, mobdebug.line(value, params),
+          format(name, fixUTF8(serialize(value, params)),
                  simpleType[type(value)] and "" or ("  --[["..comment.."]]"))
         local item = stackCtrl:AppendItem(callitem, text, 2)
         if checkIfExpandable(value, item) then
@@ -385,7 +405,7 @@ debugger.shell = function(expression, isstatement)
               local func = loadstring('return '..v) -- deserialize the value first
               if func then -- if it's deserialized correctly
                 values[i] = (forceexpression and i > 1 and '\n' or '') ..
-                  mobdebug.line(func(), {nocode = true, comment = 0,
+                  serialize(func(), {nocode = true, comment = 0,
                     -- if '=' is used, then use multi-line serialized output
                     indent = forceexpression and '  ' or nil})
               end
@@ -396,7 +416,7 @@ debugger.shell = function(expression, isstatement)
           if #values == 0 and (forceexpression or not isstatement) then
             values = {'nil'}
           end
-          DisplayShell((table.unpack or unpack)(values))
+          DisplayShell(fixUTF8((table.unpack or unpack)(values)))
         end
 
         -- refresh Stack and Watch windows if executed a statement (and no err)
@@ -480,8 +500,6 @@ debugger.listen = function()
       if redirect then
         debugger.handle("output stdout " .. redirect, nil,
           { handler = function(m)
-              if not debugger.server then return end
-
               -- if it's an error returned, then handle the error
               if m and m:find("stack traceback:", 1, true) then
                 -- this is an error message sent remotely
@@ -494,7 +512,13 @@ debugger.listen = function()
               end
 
               if ide.config.debugger.outputfilter then
-                m = ide.config.debugger.outputfilter(m)
+                local ok, res = pcall(ide.config.debugger.outputfilter, m)
+                if ok then
+                  m = res
+                else
+                  DisplayOutputLn("Output filter failed: "..res)
+                  return
+                end
               elseif m then
                 local max = 240
                 m = #m < max+4 and m or m:sub(1,max) .. "...\n"
@@ -719,25 +743,35 @@ end
 debugger.loadstring = function(file, string)
   return debugger.handle("loadstring '" .. file .. "' " .. string)
 end
-debugger.update = function()
-  copas.step(0)
-  -- if there are any pending activations
-  if debugger.activate then
-    local file, line, content = (table.unpack or unpack)(debugger.activate)
-    if content then
-      local editor = NewFile()
-      editor:SetText(content)
-      if not ide.config.debugger.allowediting
-      and not (debugger.options or {}).allowediting then
-        editor:SetReadOnly(true)
-      end
-      activateDocument(file, line)
-    elseif LoadFile(file) then
-      activateDocument(file, line)
+
+do
+  local nextupdatedelta = 0.250
+  local nextupdate = TimeGet() + nextupdatedelta
+  debugger.update = function()
+    if debugger.server or debugger.listening and TimeGet() > nextupdate then
+      copas.step(0)
+      nextupdate = TimeGet() + nextupdatedelta
     end
-    debugger.activate = nil
+
+    -- if there are any pending activations
+    if debugger.activate then
+      local file, line, content = (table.unpack or unpack)(debugger.activate)
+      if content then
+        local editor = NewFile()
+        editor:SetText(content)
+        if not ide.config.debugger.allowediting
+        and not (debugger.options or {}).allowediting then
+          editor:SetReadOnly(true)
+        end
+        activateDocument(file, line)
+      elseif LoadFile(file) then
+        activateDocument(file, line)
+      end
+      debugger.activate = nil
+    end
   end
 end
+
 debugger.terminate = function()
   if debugger.server then
     if debugger.pid then -- if there is PID, try local kill
@@ -812,6 +846,33 @@ do
 end
 
 local width, height = 360, 200
+
+function debuggerAddWindow(ctrl, panel, name)
+  local notebook = wxaui.wxAuiNotebook(ide.frame, wx.wxID_ANY,
+    wx.wxDefaultPosition, wx.wxDefaultSize,
+    wxaui.wxAUI_NB_DEFAULT_STYLE + wxaui.wxAUI_NB_TAB_EXTERNAL_MOVE
+    - wxaui.wxAUI_NB_CLOSE_ON_ACTIVE_TAB + wx.wxNO_BORDER)
+  notebook:AddPage(ctrl, TR(name), true)
+
+  local mgr = ide.frame.uimgr
+  mgr:AddPane(notebook, wxaui.wxAuiPaneInfo():
+              Name(panel):Float():
+              MinSize(width/2,height/2):
+              BestSize(width,height):FloatingSize(width,height):
+              PinButton(true):Hide())
+  mgr.defaultPerspective = mgr:SavePerspective() -- resave default perspective
+
+  return notebook
+end
+
+function DebuggerAddStackWindow()
+  return debuggerAddWindow(debugger.stackCtrl, "stackpanel", "Stack")
+end
+
+function DebuggerAddWatchWindow()
+  return debuggerAddWindow(debugger.watchCtrl, "watchpanel", "Watch")
+end
+
 function debuggerCreateStackWindow()
   local stackCtrl = wx.wxTreeCtrl(ide.frame, wx.wxID_ANY,
     wx.wxDefaultPosition, wx.wxSize(width, height),
@@ -821,7 +882,7 @@ function debuggerCreateStackWindow()
 
   stackCtrl:SetImageList(imglist)
 
-  stackCtrl:Connect( wx.wxEVT_COMMAND_TREE_ITEM_EXPANDING,
+  stackCtrl:Connect(wx.wxEVT_COMMAND_TREE_ITEM_EXPANDING,
     function (event)
       local item_id = event:GetItem()
       local count = stackCtrl:GetChildrenCount(item_id, false)
@@ -830,7 +891,7 @@ function debuggerCreateStackWindow()
       local image = stackCtrl:GetItemImage(item_id)
       local num = 1
       for name,value in pairs(stackItemValue[item_id:GetValue()]) do
-        local strval = mobdebug.line(value, {comment = false, nocode = true})
+        local strval = fixUTF8(serialize(value, params))
         local text = type(name) == "number"
           and (num == name and strval or ("[%s] = %s"):format(name, strval))
           or ("%s = %s"):format(tostring(name), strval)
@@ -839,6 +900,7 @@ function debuggerCreateStackWindow()
           stackCtrl:SetItemHasChildren(item, true)
         end
         num = num + 1
+        if num > stackmaxnum then break end
       end
       return true
     end)
@@ -861,19 +923,12 @@ function debuggerCreateStackWindow()
     end
   end)
 
-  local notebook = wxaui.wxAuiNotebook(ide.frame, wx.wxID_ANY,
-    wx.wxDefaultPosition, wx.wxDefaultSize,
-    wxaui.wxAUI_NB_DEFAULT_STYLE + wxaui.wxAUI_NB_TAB_EXTERNAL_MOVE
-    - wxaui.wxAUI_NB_CLOSE_ON_ACTIVE_TAB + wx.wxNO_BORDER)
-  notebook:AddPage(stackCtrl, TR("Stack"), true)
-
-  local mgr = ide.frame.uimgr
-  mgr:AddPane(notebook, wxaui.wxAuiPaneInfo():
-              Name("stackpanel"):Float():
-              MinSize(width/2,height/2):
-              BestSize(width,height):FloatingSize(width,height):
-              PinButton(true):Hide())
-  mgr.defaultPerspective = mgr:SavePerspective() -- resave default perspective
+  local layout = ide:GetSetting("/view", "uimgrlayout")
+  if layout and not layout:find("stackpanel") then
+    ide.frame.bottomnotebook:AddPage(stackCtrl, TR("Stack"), true)
+    return
+  end
+  DebuggerAddStackWindow()
 end
 
 local function debuggerCreateWatchWindow()
@@ -929,9 +984,7 @@ local function debuggerCreateWatchWindow()
   end
 
   watchCtrl:Connect(wx.wxEVT_CONTEXT_MENU,
-    function (event)
-      watchCtrl:PopupMenu(watchMenu)
-    end)
+    function (event) watchCtrl:PopupMenu(watchMenu) end)
 
   watchCtrl:Connect(wx.wxEVT_KEY_DOWN,
     function (event)
@@ -953,6 +1006,9 @@ local function debuggerCreateWatchWindow()
   watchCtrl:Connect(ID_DELETEWATCH, wx.wxEVT_UPDATE_UI,
     function (event) event:Enable(watchCtrl:GetSelectedItemCount() > 0) end)
 
+  watchCtrl:Connect(wx.wxEVT_COMMAND_LIST_ITEM_ACTIVATED,
+    function (event) watchCtrl:EditLabel(event:GetIndex()) end)
+
   watchCtrl:Connect(wx.wxEVT_COMMAND_LIST_END_LABEL_EDIT,
     function (event)
       local row = event:GetIndex()
@@ -967,19 +1023,12 @@ local function debuggerCreateWatchWindow()
       event:Skip()
     end)
 
-  local notebook = wxaui.wxAuiNotebook(ide.frame, wx.wxID_ANY,
-    wx.wxDefaultPosition, wx.wxDefaultSize,
-    wxaui.wxAUI_NB_DEFAULT_STYLE + wxaui.wxAUI_NB_TAB_EXTERNAL_MOVE
-    - wxaui.wxAUI_NB_CLOSE_ON_ACTIVE_TAB + wx.wxNO_BORDER)
-  notebook:AddPage(watchCtrl, TR("Watch"), true)
-
-  local mgr = ide.frame.uimgr
-  mgr:AddPane(notebook, wxaui.wxAuiPaneInfo():
-              Name("watchpanel"):Float():
-              MinSize(width/2,height/2):
-              BestSize(width,height):FloatingSize(width,height):
-              PinButton(true):Hide())
-  mgr.defaultPerspective = mgr:SavePerspective() -- resave default perspective
+  local layout = ide:GetSetting("/view", "uimgrlayout")
+  if layout and not layout:find("watchpanel") then
+    ide.frame.bottomnotebook:AddPage(watchCtrl, TR("Watch"), true)
+    return
+  end
+  DebuggerAddWatchWindow()
 end
 
 debuggerCreateStackWindow()
@@ -993,7 +1042,7 @@ DebuggerRefreshPanels = updateStackAndWatches
 function DebuggerAddWatch(watch)
   local mgr = ide.frame.uimgr
   local pane = mgr:GetPane("watchpanel")
-  if (not pane:IsShown()) then
+  if (pane:IsOk() and not pane:IsShown()) then
     pane:Show()
     mgr:Update()
   end
