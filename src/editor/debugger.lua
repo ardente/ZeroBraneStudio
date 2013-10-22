@@ -6,6 +6,7 @@
 local copas = require "copas"
 local socket = require "socket"
 local mobdebug = require "mobdebug"
+local unpack = table.unpack or unpack
 
 local ide = ide
 local debugger = ide.debugger
@@ -45,10 +46,10 @@ function fixUTF8(...)
     local text = t[i]:sub(1, stackmaxlength)..(#t[i] > stackmaxlength and '...' or '')
     t[i] = FixUTF8(text, fix)
   end
-  return (table.unpack or unpack)(t)
+  return unpack(t)
 end
 
-local function q(s) return s:gsub('([%(%)%.%%%+%-%*%?%[%^%$%]])','%%%1') end
+local q = EscapeMagic
 
 local function updateWatchesSync(num)
   local watchCtrl = debugger.watchCtrl
@@ -416,7 +417,7 @@ debugger.shell = function(expression, isstatement)
           if #values == 0 and (forceexpression or not isstatement) then
             values = {'nil'}
           end
-          DisplayShell(fixUTF8((table.unpack or unpack)(values)))
+          DisplayShell(fixUTF8(unpack(values)))
         end
 
         -- refresh Stack and Watch windows if executed a statement (and no err)
@@ -755,7 +756,7 @@ do
 
     -- if there are any pending activations
     if debugger.activate then
-      local file, line, content = (table.unpack or unpack)(debugger.activate)
+      local file, line, content = unpack(debugger.activate)
       if content then
         local editor = NewFile()
         editor:SetText(content)
@@ -948,10 +949,11 @@ local function debuggerCreateWatchWindow()
   info:SetWidth(width * 0.56)
   watchCtrl:InsertColumn(1, info)
 
-  local watchMenu = wx.wxMenu{
+  local watchMenu = wx.wxMenu {
     { ID_ADDWATCH, TR("&Add Watch")..KSC(ID_ADDWATCH) },
     { ID_EDITWATCH, TR("&Edit Watch")..KSC(ID_EDITWATCH) },
-    { ID_DELETEWATCH, TR("&Delete Watch")..KSC(ID_DELETEWATCH) }}
+    { ID_DELETEWATCH, TR("&Delete Watch")..KSC(ID_DELETEWATCH) },
+  }
 
   local function findSelectedWatchItem()
     local count = watchCtrl:GetSelectedItemCount()
@@ -1098,22 +1100,15 @@ function DebuggerToggleBreakpoint(editor, line)
   -- ignore requests to toggle when the debugger is running
   if debugger.server and debugger.running then return end
   local markers = editor:MarkerGet(line)
-  if markers >= CURRENT_LINE_MARKER_VALUE then
-    markers = markers - CURRENT_LINE_MARKER_VALUE
-  end
   local id = editor:GetId()
   local filePath = debugger.editormap and debugger.editormap[editor]
     or DebuggerMakeFileName(editor, ide.openDocuments[id].filePath)
-  if markers >= BREAKPOINT_MARKER_VALUE then
+  if bit.band(markers, BREAKPOINT_MARKER_VALUE) > 0 then
     editor:MarkerDelete(line, BREAKPOINT_MARKER)
-    if debugger.server then
-      debugger.breakpoint(filePath, line+1, false)
-    end
+    if debugger.server then debugger.breakpoint(filePath, line+1, false) end
   else
     editor:MarkerAdd(line, BREAKPOINT_MARKER)
-    if debugger.server then
-      debugger.breakpoint(filePath, line+1, true)
-    end
+    if debugger.server then debugger.breakpoint(filePath, line+1, true) end
   end
 end
 

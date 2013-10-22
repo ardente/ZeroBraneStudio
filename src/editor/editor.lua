@@ -202,16 +202,14 @@ function GetEditorFileAndCurInfo(nochecksave)
 end
 
 -- Set if the document is modified and update the notebook page text
-function SetDocumentModified(id, modified)
-  if not openDocuments[id] then return end
-  local pageText = openDocuments[id].fileName or ide.config.default.fullname
+function SetDocumentModified(id, modified, text)
+  local modpref, doc = '* ', openDocuments[id]
+  if not doc then return end
+  local pageText = text or notebook:GetPageText(doc.index):gsub("^"..EscapeMagic(modpref), "")
 
-  if modified then
-    pageText = "* "..pageText
-  end
-
+  if modified then pageText = modpref..pageText end
   openDocuments[id].isModified = modified
-  notebook:SetPageText(openDocuments[id].index, pageText)
+  notebook:SetPageText(doc.index, pageText)
 end
 
 function EditorAutoComplete(editor)
@@ -598,6 +596,13 @@ function CreateEditor()
   editor.assignscache = false
   editor.autocomplete = false
   editor.jumpstack = {}
+  editor.ctrlcache = {}
+  -- populate cache with Ctrl-<letter> combinations for workaround on Linux
+  -- http://wxwidgets.10942.n7.nabble.com/Menu-shortcuts-inconsistentcy-issue-td85065.html
+  for id, shortcut in pairs(ide.config.keymap) do
+    local key = shortcut:match('^Ctrl[-+](%w)$')
+    if key then editor.ctrlcache[key:byte()] = id end
+  end
 
   editor:SetBufferedDraw(not ide.config.hidpi and true or false)
   editor:StyleClearAll()
@@ -1044,12 +1049,12 @@ function CreateEditor()
           editor:SetTargetEnd(pos+1)
         end
         editor:ReplaceTarget("")
-      elseif ide.osname == "Unix" and ide.wxver >= "2.9.5"
-      and keycode == ('T'):byte() and mod == wx.wxMOD_CONTROL then
-        ide.frame:AddPendingEvent(wx.wxCommandEvent(
-          wx.wxEVT_COMMAND_MENU_SELECTED, ID_SHOWTOOLTIP))
       elseif mod == wx.wxMOD_ALT and keycode == wx.WXK_LEFT then
         navigateBack(editor)
+      elseif ide.osname == "Unix" and ide.wxver >= "2.9.5"
+      and mod == wx.wxMOD_CONTROL and editor.ctrlcache[keycode] then
+        ide.frame:AddPendingEvent(wx.wxCommandEvent(
+          wx.wxEVT_COMMAND_MENU_SELECTED, editor.ctrlcache[keycode]))
       else
         if ide.osname == 'Macintosh' and mod == wx.wxMOD_META then
           return -- ignore a key press if Command key is also pressed
@@ -1114,21 +1119,22 @@ function CreateEditor()
       local line = instances and instances[0] and editor:LineFromPosition(instances[0]-1)+1
       local def =  line and " ("..TR("on line %d"):format(line)..")" or ""
 
-      local menu = wx.wxMenu()
-      menu:Append(ID_UNDO, TR("&Undo"))
-      menu:Append(ID_REDO, TR("&Redo"))
-      menu:AppendSeparator()
-      menu:Append(ID_CUT, TR("Cu&t"))
-      menu:Append(ID_COPY, TR("&Copy"))
-      menu:Append(ID_PASTE, TR("&Paste"))
-      menu:Append(ID_SELECTALL, TR("Select &All"))
-      menu:AppendSeparator()
-      menu:Append(ID_GOTODEFINITION, TR("Go To Definition")..def)
-      menu:Append(ID_RENAMEALLINSTANCES, TR("Rename All Instances")..occurrences)
-      menu:AppendSeparator()
-      menu:Append(ID_QUICKADDWATCH, TR("Add Watch Expression"))
-      menu:Append(ID_QUICKEVAL, TR("Evaluate In Console"))
-      menu:Append(ID_ADDTOSCRATCHPAD, TR("Add To Scratchpad"))
+      local menu = wx.wxMenu {
+        { ID_UNDO, TR("&Undo") },
+        { ID_REDO, TR("&Redo") },
+        { },
+        { ID_CUT, TR("Cu&t") },
+        { ID_COPY, TR("&Copy") },
+        { ID_PASTE, TR("&Paste") },
+        { ID_SELECTALL, TR("Select &All") },
+        { },
+        { ID_GOTODEFINITION, TR("Go To Definition")..def },
+        { ID_RENAMEALLINSTANCES, TR("Rename All Instances")..occurrences },
+        { },
+        { ID_QUICKADDWATCH, TR("Add Watch Expression") },
+        { ID_QUICKEVAL, TR("Evaluate In Console") },
+        { ID_ADDTOSCRATCHPAD, TR("Add To Scratchpad") },
+      }
 
       menu:Enable(ID_GOTODEFINITION, instances and instances[0])
       menu:Enable(ID_RENAMEALLINSTANCES, instances and (instances[0] or #instances > 0))

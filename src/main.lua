@@ -6,6 +6,7 @@
 local iswindows = os.getenv('WINDIR') or (os.getenv('OS') or ''):match('[Ww]indows')
 local islinux = not iswindows and not os.getenv('DYLD_LIBRARY_PATH') and io.open("/proc")
 local arch = "x86" -- use 32bit by default
+local unpack = table.unpack or unpack
 
 if islinux then
   local file = io.popen("uname -m")
@@ -134,6 +135,8 @@ ide = {
 
   osname = wx.wxPlatformInfo.Get():GetOperatingSystemFamilyName(),
   osarch = arch,
+  oshome = os.getenv("HOME") or (iswindows and os.getenv('HOMEDRIVE') and os.getenv('HOMEPATH')
+    and (os.getenv('HOMEDRIVE')..os.getenv('HOMEPATH'))),
   wxver = string.match(wx.wxVERSION_STRING, "[%d%.]+"),
 }
 
@@ -271,6 +274,10 @@ end
 -- load packages
 local function loadPackages(filter)
   loadToTab(filter, "packages", ide.packages, false, ide.proto.Plugin)
+  if ide.oshome then
+    local userpackages = MergeFullPath(ide.oshome, ".zbstudio/packages")
+    loadToTab(filter, userpackages, ide.packages, false, ide.proto.Plugin)
+  end
   -- assign file names to each package
   for fname, package in pairs(ide.packages) do package.fname = fname end
 end
@@ -383,10 +390,9 @@ loadSpecs()
 loadTools()
 
 do
-  local home = os.getenv("HOME") or (iswindows and (os.getenv('HOMEDRIVE')..os.getenv('HOMEPATH')))
   ide.configs = {
     system = MergeFullPath("cfg", "user.lua"),
-    user = home and MergeFullPath(home, ".zbstudio/user.lua"),
+    user = ide.oshome and MergeFullPath(ide.oshome, ".zbstudio/user.lua"),
   }
 
   -- process configs

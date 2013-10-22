@@ -6,6 +6,7 @@ local frame = ide.frame
 local notebook = frame.notebook
 local openDocuments = ide.openDocuments
 local uimgr = frame.uimgr
+local unpack = table.unpack or unpack
 
 local CURRENT_LINE_MARKER = StylesGetMarker("currentline")
 local CURRENT_LINE_MARKER_VALUE = 2^CURRENT_LINE_MARKER
@@ -40,20 +41,19 @@ end
 function LoadFile(filePath, editor, file_must_exist, skipselection)
   local filePath = wx.wxFileName(filePath)
   filePath:Normalize() -- make it absolute and remove all .. and . if possible
+  filePath = filePath:GetFullPath()
 
   -- prevent files from being reopened again
   if (not editor) then
-    for id, doc in pairs(openDocuments) do
-      if doc.filePath and filePath:SameAs(wx.wxFileName(doc.filePath)) then
-        if not skipselection and doc.index ~= notebook:GetSelection() then
-          -- selecting the same tab doesn't trigger PAGE_CHANGE event,
-          -- but moves the focus to the tab bar, which needs to be avoided.
-          notebook:SetSelection(doc.index) end
-        return doc.editor
-      end
+    local doc = ide:FindDocument(filePath)
+    if doc then
+      if not skipselection and doc.index ~= notebook:GetSelection() then
+        -- selecting the same tab doesn't trigger PAGE_CHANGE event,
+        -- but moves the focus to the tab bar, which needs to be avoided.
+        notebook:SetSelection(doc.index) end
+      return doc.editor
     end
   end
-  filePath = filePath:GetFullPath()
 
   -- if not opened yet, try open now
   local file_text = FileRead(filePath)
@@ -133,13 +133,13 @@ function LoadFile(filePath, editor, file_must_exist, skipselection)
   openDocuments[id].fileName = wx.wxFileName(filePath):GetFullName()
   openDocuments[id].modTime = GetFileModTime(filePath)
 
-  PackageEventHandle("onEditorLoad", editor)
-
-  SetDocumentModified(id, false)
+  SetDocumentModified(id, false, openDocuments[id].fileName)
 
   -- activate the editor; this is needed for those cases when the editor is
   -- created from some other element, for example, from a project tree.
   if not skipselection then SetEditorSelection() end
+
+  PackageEventHandle("onEditorLoad", editor)
 
   return editor
 end
@@ -159,6 +159,10 @@ local function getExtsString()
   return exts..TR("All files").." (*)|*"
 end
 
+function ReportError(msg)
+  return wx.wxMessageBox(msg, TR("Error"), wx.wxICON_ERROR + wx.wxOK + wx.wxCENTRE, ide.frame)
+end
+
 function OpenFile(event)
   local exts = getExtsString()
   local fileDialog = wx.wxFileDialog(ide.frame, TR("Open file"),
@@ -168,9 +172,7 @@ function OpenFile(event)
     wx.wxFD_OPEN + wx.wxFD_FILE_MUST_EXIST)
   if fileDialog:ShowModal() == wx.wxID_OK then
     if not LoadFile(fileDialog:GetPath(), nil, true) then
-      wx.wxMessageBox(TR("Unable to load file '%s'."):format(fileDialog:GetPath()),
-        TR("Error"),
-        wx.wxOK + wx.wxCENTRE, ide.frame)
+      ReportError(TR("Unable to load file '%s'."):format(fileDialog:GetPath()))
     end
   end
   fileDialog:Destroy()
@@ -186,7 +188,14 @@ function SaveFile(editor, filePath)
       return false
     end
 
-    if (ide.config.savebak) then FileRename(filePath, filePath..".bak") end
+    if ide.config.savebak then
+      local ok, err = FileRename(filePath, filePath..".bak")
+      if not ok then
+        ReportError(TR("Unable to save file '%s'."):format(filePath..".bak")
+        .."\nError: "..err)
+        return
+      end
+    end
 
     local st = editor:GetText()
     if GetConfigIOFilter("output") then
@@ -205,20 +214,25 @@ function SaveFile(editor, filePath)
       openDocuments[id].filePath = filePath
       openDocuments[id].fileName = wx.wxFileName(filePath):GetFullName()
       openDocuments[id].modTime = GetFileModTime(filePath)
-      SetDocumentModified(id, false)
+      SetDocumentModified(id, false, openDocuments[id].fileName)
       SetAutoRecoveryMark()
 
       PackageEventHandle("onEditorSave", editor)
 
       return true
     else
-      wx.wxMessageBox(TR("Unable to save file '%s': %s"):format(filePath, err),
-        TR("Error"),
-        wx.wxICON_ERROR + wx.wxOK + wx.wxCENTRE, ide.frame)
+      ReportError(TR("Unable to save file '%s': %s"):format(filePath, err))
     end
   end
 
   return false
+end
+
+function ApproveFileOverwrite()
+  return wx.wxMessageBox(
+    TR("File already exists.").."\n"..TR("Do you want to overwrite it?"),
+    GetIDEString("editormessage"),
+    wx.wxYES_NO + wx.wxCENTRE, ide.frame) == wx.wxYES
 end
 
 function SaveFileAs(editor)
@@ -248,17 +262,13 @@ function SaveFileAs(editor)
   if fileDialog:ShowModal() == wx.wxID_OK then
     local filePath = fileDialog:GetPath()
 
-    -- first check if there is another tab with the same name and close it
-    local existing
-    local fileName = wx.wxFileName(filePath)
-    for _, document in pairs(ide.openDocuments) do
-      if document.filePath and fileName:SameAs(wx.wxFileName(document.filePath)) then
-        existing = document.index
-        break
-      end
-    end
+    -- check if there is another tab with the same name and prepare to close it
+    local existing = (ide:FindDocument(filePath) or {}).index
+    local cansave = fn:GetFullName() == filePath -- saving into the same file
+       or not wx.wxFileName(filePath):FileExists() -- or a new file
+       or ApproveFileOverwrite()
 
-    if SaveFile(editor, filePath) then
+    if cansave and SaveFile(editor, filePath) then
       SetEditorSelection() -- update title of the editor
       FileTreeMarkSelected(filePath)
       if ext ~= GetFileExt(filePath) then
@@ -440,8 +450,8 @@ function FoldSome()
 
   for ln = 0, editor.LineCount - 1 do
     local foldRaw = editor:GetFoldLevel(ln)
-    local foldLvl = math.mod(foldRaw, 4096)
-    local foldHdr = math.mod(math.floor(foldRaw / 8192), 2) == 1
+    local foldLvl = foldRaw % 4096
+    local foldHdr = (math.floor(foldRaw / 8192) % 2) == 1
 
     -- at least one header is expanded
     foldall = foldall or (foldHdr and editor:GetFoldExpanded(ln))
@@ -460,8 +470,8 @@ function FoldSome()
 
   for ln = 0, editor.LineCount-1 do
     local foldRaw = editor:GetFoldLevel(ln)
-    local foldLvl = math.mod(foldRaw, 4096)
-    local foldHdr = math.mod(math.floor(foldRaw / 8192), 2) == 1
+    local foldLvl = foldRaw % 4096
+    local foldHdr = (math.floor(foldRaw / 8192) % 2) == 1
 
     if foldall then
       if foldHdr and editor:GetFoldExpanded(ln) then
