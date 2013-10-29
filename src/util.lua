@@ -162,7 +162,7 @@ end
 function FileSysGetRecursive(path, recursive, spec, skip)
   spec = spec or "*"
   local content = {}
-  local sep = string.char(wx.wxFileName.GetPathSeparator())
+  local sep = GetPathSeparator()
 
   -- recursion is done in all folders but only those folders that match
   -- the spec are returned. This is the pattern that matches the spec.
@@ -172,12 +172,16 @@ function FileSysGetRecursive(path, recursive, spec, skip)
     local dir = wx.wxDir(path)
     if not dir:IsOpened() then return end
 
-    local found, file = dir:GetFirst("*", wx.wxDIR_DIRS + wx.wxDIR_NO_FOLLOW)
+    local found, file = dir:GetFirst("*", wx.wxDIR_DIRS)
     while found do
       if not skip or not file:find(skip) then
         local fname = wx.wxFileName(path, file):GetFullPath()
         if fname:find(specmask) then table.insert(content, fname..sep) end
-        if recursive then getDir(fname, spec) end
+        -- check if this name already appears in the path earlier;
+        -- Skip the processing if it does as it could lead to infinite
+        -- recursion with circular references created by symlinks.
+        if recursive and select(2, fname:gsub(file..sep,'')) <= 2 then
+          getDir(fname, spec) end
       end
       found, file = dir:GetNext()
     end
@@ -230,6 +234,12 @@ end
 
 function FileWrite(file, content)
   local log = wx.wxLogNull() -- disable error reporting; will report as needed
+
+  if not wx.wxFileExists(file)
+  and not wx.wxFileName(file):Mkdir(tonumber(755,8), wx.wxPATH_MKDIR_FULL) then
+    return nil, wx.wxSysErrorMsg()
+  end
+
   local file = wx.wxFile(file, wx.wxFile.write)
   if not file:IsOpened() then return nil, wx.wxSysErrorMsg() end
 
@@ -368,8 +378,9 @@ end
 
 function LoadLuaFileExt(tab, file, proto)
   local cfgfn,err = loadfile(file)
+  local report = DisplayOutputLn or print
   if not cfgfn then
-    print(("Error while loading file: '%s'."):format(err))
+    report(("Error while loading file: '%s'."):format(err))
   else
     local name = file:match("([a-zA-Z_0-9%-]+)%.lua$")
     if not name then return end
@@ -383,7 +394,7 @@ function LoadLuaFileExt(tab, file, proto)
 
     local success, result = pcall(function()return cfgfn(assert(_G or _ENV))end)
     if not success then
-      print(("Error while processing file: '%s'."):format(result))
+      report(("Error while processing file: '%s'."):format(result))
     else
       if (tab[name]) then
         local out = tab[name]
@@ -393,6 +404,34 @@ function LoadLuaFileExt(tab, file, proto)
       else
         tab[name] = proto and result and setmetatable(result, proto) or result
       end
+    end
+  end
+end
+
+function LoadLuaConfig(filename,isstring)
+  if not filename then return end
+  -- skip those files that don't exist
+  if not isstring and not wx.wxFileName(filename):FileExists() then return end
+  -- if it's marked as command, but exists as a file, load it as a file
+  if isstring and wx.wxFileName(filename):FileExists() then isstring = false end
+
+  local cfgfn, err, msg
+  if isstring
+  then msg, cfgfn, err = "string", loadstring(filename)
+  else msg, cfgfn, err = "file", loadfile(filename) end
+
+  local report = DisplayOutputLn or print
+  if not cfgfn then
+    report(("Error while loading configuration %s: '%s'."):format(msg, err))
+  else
+    ide.config.os = os
+    ide.config.wxstc = wxstc
+    ide.config.load = { interpreters = loadInterpreters,
+      specs = loadSpecs, tools = loadTools }
+    setfenv(cfgfn,ide.config)
+    local _, err = pcall(function()cfgfn(assert(_G or _ENV))end)
+    if err then
+      report(("Error while processing configuration %s: '%s'."):format(msg, err))
     end
   end
 end

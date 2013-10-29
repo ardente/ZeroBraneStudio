@@ -202,11 +202,6 @@ function SaveFile(editor, filePath)
       st = GetConfigIOFilter("output")(filePath,st)
     end
 
-    local file = wx.wxFileName(filePath)
-    if not file:FileExists() then
-      file:Mkdir(tonumber(755,8), wx.wxPATH_MKDIR_FULL)
-    end
-
     local ok, err = FileWrite(filePath, st)
     if ok then
       editor:SetSavePoint()
@@ -518,35 +513,34 @@ function ClearAllCurrentLineMarkers()
 end
 
 local compileOk, compileTotal = 0, 0
-function CompileProgram(editor, quiet)
+function CompileProgram(editor, params)
+  local params = { jumponerror = (params or {}).jumponerror ~= false,
+    reportstats = (params or {}).reportstats ~= false }
   -- remove shebang line (#!) as it throws a compilation error as
   -- loadstring() doesn't allow it even though lua/loadfile accepts it.
   -- replace with a new line to keep the number of lines the same.
   local editorText = editor:GetText():gsub("^#!.-\n", "\n")
   local id = editor:GetId()
   local filePath = DebuggerMakeFileName(editor, openDocuments[id].filePath)
-  local func, line_num, errMsg, _ = loadstring(editorText, filePath), -1
-  if not func then
-    _, errMsg, line_num = wxlua.CompileLuaScript(editorText, filePath)
-  end
+  local func, err = loadstring(editorText, '@'..filePath)
+  local line = not func and tonumber(err:match(":(%d+)%s*:")) or nil
 
   if ide.frame.menuBar:IsChecked(ID_CLEAROUTPUT) then ClearOutput() end
 
   compileTotal = compileTotal + 1
-  if line_num > -1 then
-    DisplayOutput(TR("Compilation error")
-      .." "..TR("on line %d"):format(line_num)
-      ..":\n"..errMsg:gsub("Lua:.-\n", ""))
-    if not quiet then editor:GotoLine(line_num-1) end
-  else
+  if func then
     compileOk = compileOk + 1
-    if not quiet then
+    if params.reportstats then
       DisplayOutputLn(TR("Compilation successful; %.0f%% success rate (%d/%d).")
         :format(compileOk/compileTotal*100, compileOk, compileTotal))
     end
+  else
+    DisplayOutputLn(TR("Compilation error").." "..TR("on line %d"):format(line)..":")
+    DisplayOutputLn((err:gsub("\n$", "")))
+    if line and params.jumponerror then editor:GotoLine(line-1) end
   end
 
-  return line_num == -1, editorText -- return true if it compiled ok
+  return func ~= nil, editorText -- return true if it compiled ok
 end
 
 ------------------
