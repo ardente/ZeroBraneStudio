@@ -226,9 +226,9 @@ return {
   },
 
   keywords = {
-    [[and break do else elseif end for function goto if in local not or repeat return then until while false self true]],
+    [[and break do else elseif end for function goto if in local not or repeat return then until while false self true nil]],
 
-    [[_G _VERSION _ENV io.stderr io.stdin io.stdout nil math.huge math.pi package.config
+    [[_G _VERSION _ENV io.stderr io.stdin io.stdout math.huge math.pi package.config
       package.cpath package.loaded package.loaders package.path package.preload package.searchers]],
 
     [[assert collectgarbage dofile error getfenv getmetatable ipairs load loadfile loadstring
