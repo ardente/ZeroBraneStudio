@@ -1,11 +1,10 @@
 -- authors: Luxinia Dev (Eike Decker & Christoph Kubisch)
 ---------------------------------------------------------
 
-local binpath = os.getenv("GLSLC_BIN_PATH")
+local binpath = ide.config.path.glslcbin or os.getenv("GLSLC_BIN_PATH")
 
 return binpath and {
   fninit = function(frame,menuBar)
-    binpath = ide.config.path.glslcbin or os.getenv("GLSLC_BIN_PATH")
 
     local myMenu = wx.wxMenu{
       { ID "glslc.compile.input", "&Custom Args", "when set a popup for custom compiler args will be envoked", wx.wxITEM_CHECK },
@@ -314,6 +313,7 @@ return binpath and {
 
       local cmdline = "-profile "..profile.." "
       cmdline = args and cmdline..args.." " or cmdline
+      cmdline = cmdline.."-I*.glsl -I*.h "
       cmdline = cmdline..(data.separable and "-separable " or "")
       cmdline = cmdline..data.domaindefs[domain].." "
       cmdline = cmdline.."-o "..outname.." "
@@ -336,9 +336,11 @@ return binpath and {
 
         return str,postfunc
       end
+      
+      local wdir = filename:GetPath()
 
       -- run compiler process
-      CommandLineRun(cmdline,nil,true,nil,compilecallback)
+      CommandLineRun(cmdline,wdir,true,nil,compilecallback)
 
     end
 
