@@ -71,6 +71,16 @@ function LoadFile(filePath, editor, file_must_exist, skipselection)
   editor:Freeze()
   SetupKeywords(editor, GetFileExt(filePath))
   editor:MarkerDeleteAll(-1)
+
+  -- remove BOM from UTF-8 encoded files; store BOM to add back when saving
+  editor.bom = string.char(0xEF,0xBB,0xBF)
+  if file_text and editor:GetCodePage() == wxstc.wxSTC_CP_UTF8
+  and file_text:find("^"..editor.bom) then
+    file_text = file_text:gsub("^"..editor.bom, "")
+  else
+    -- set to 'false' as checks for nil on wxlua objects may fail at run-time
+    editor.bom = false
+  end
   editor:SetText(file_text or "")
 
   -- check the editor as it can be empty if the file has malformed UTF8;
@@ -199,7 +209,8 @@ function SaveFile(editor, filePath)
       end
     end
 
-    local st = editor:GetText()
+    local st = (editor:GetCodePage() == wxstc.wxSTC_CP_UTF8 and editor.bom or "")
+      .. editor:GetText()
     if GetConfigIOFilter("output") then
       st = GetConfigIOFilter("output")(filePath,st)
     end
@@ -540,7 +551,22 @@ function CompileProgram(editor, params)
   else
     DisplayOutputLn(TR("Compilation error").." "..TR("on line %d"):format(line)..":")
     DisplayOutputLn((err:gsub("\n$", "")))
-    if line and params.jumponerror then editor:GotoLine(line-1) end
+    -- check for escapes invalid in LuaJIT/Lua 5.2 that are allowed in Lua 5.1
+    if err:find('invalid escape sequence') then
+      local s = editor:GetLine(line-1)
+      local cleaned = s
+        :gsub('\\[abfnrtv\\"\']', '  ')
+        :gsub('(\\x[0-9a-fA-F][0-9a-fA-F])', function(s) return string.rep(' ', #s) end)
+        :gsub('(\\%d%d?%d?)', function(s) return string.rep(' ', #s) end)
+        :gsub('(\\z%s*)', function(s) return string.rep(' ', #s) end)
+      local invalid = cleaned:find("\\")
+      if invalid then
+        DisplayOutputLn(TR("Consider removing backslash from escape sequence '%s'.")
+          :format(s:sub(invalid,invalid+1)))
+      end
+    end
+    if line and params.jumponerror and line-1 ~= editor:GetCurrentLine() then
+      editor:GotoLine(line-1) end
   end
 
   return func ~= nil -- return true if it compiled ok
