@@ -12,6 +12,7 @@ local notebook = ide.frame.notebook
 local funclist = ide.frame.toolBar.funclist
 local edcfg = ide.config.editor
 local styles = ide.config.styles
+local unpack = table.unpack or unpack
 
 local DEFAULT_STYLE = 32
 local margin = { LINENUMBER = 0, MARKER = 1, FOLD = 2 }
@@ -138,6 +139,7 @@ local function navigateBack(editor)
   if #editor.jumpstack == 0 then return end
   local pos = table.remove(editor.jumpstack)
   editor:GotoPos(pos)
+  return true
 end
 
 -- ----------------------------------------------------------------------------
@@ -595,6 +597,7 @@ function CreateEditor()
   editor.matchon = false
   editor.assignscache = false
   editor.autocomplete = false
+  editor.bom = false
   editor.jumpstack = {}
   editor.ctrlcache = {}
   -- populate cache with Ctrl-<letter> combinations for workaround on Linux
@@ -602,6 +605,18 @@ function CreateEditor()
   for id, shortcut in pairs(ide.config.keymap) do
     local key = shortcut:match('^Ctrl[-+](%w)$')
     if key then editor.ctrlcache[key:byte()] = id end
+  end
+
+  -- populate editor keymap with configured combinations
+  for _, map in ipairs(ide.config.editor.keymap) do
+    local key, mod, cmd, os = unpack(map)
+    if not os or os == ide.osname then
+      if cmd then
+        editor:CmdKeyAssign(key, mod, cmd)
+      else
+        editor:CmdKeyClear(key, mod)
+      end
+    end
   end
 
   editor:SetBufferedDraw(not ide.config.hidpi and true or false)
@@ -918,7 +933,17 @@ function CreateEditor()
 
   editor:Connect(wxstc.wxEVT_STC_PAINTED,
     function ()
-      if ide.osname == 'Windows' then updateStatusText(editor) end
+      if ide.osname == 'Windows' then
+        updateStatusText(editor)
+
+        if ide.config.editor.usewrap ~= true and editor:AutoCompActive() then
+          -- showing auto-complete list leaves artifacts on the screen,
+          -- which can only be fixed by a forced refresh.
+          -- shows with wxSTC 3.21 and both wxwidgets 2.9.5 and 3.1
+          editor:Update()
+          editor:Refresh()
+        end
+      end
     end)
 
   editor:Connect(wxstc.wxEVT_STC_UPDATEUI,
@@ -1050,7 +1075,9 @@ function CreateEditor()
         end
         editor:ReplaceTarget("")
       elseif mod == wx.wxMOD_ALT and keycode == wx.WXK_LEFT then
-        navigateBack(editor)
+        -- if no "jump back" is needed, then do normal processing as this
+        -- combination can be mapped to some action
+        if not navigateBack(editor) then event:Skip() end
       elseif ide.osname == "Unix" and ide.wxver >= "2.9.5"
       and mod == wx.wxMOD_CONTROL and editor.ctrlcache[keycode] then
         ide.frame:AddPendingEvent(wx.wxCommandEvent(
