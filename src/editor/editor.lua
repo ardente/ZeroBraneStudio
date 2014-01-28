@@ -358,7 +358,7 @@ function EditorIsModified(editor)
 end
 
 -- Indicator handling for functions and local/global variables
-local function indicateFunctions28(editor, lines, linee)
+local function indicateFunctionsOnly(editor, lines, linee)
   if not (edcfg.showfncall and editor.spec and editor.spec.isfncall)
   or not (styles.indicator and styles.indicator.fncall) then return end
 
@@ -460,7 +460,10 @@ function IndicateAll(editor, lines, linee)
   -- when there are still some pending events for it, so handle it.
   if not pcall(function() return editor:GetId() end) then return end
 
-  if not (editor.spec and editor.spec.markvars) then return end
+  -- if markvars is not set in the spec, check for functions-only indicators
+  if not (editor.spec and editor.spec.markvars) then
+    return indicateFunctionsOnly(editor, lines, linee)
+  end
   local indic = styles.indicator or {}
 
   local pos, vars = d and d[1] or 1, d and d[2] or nil
@@ -583,7 +586,7 @@ function IndicateAll(editor, lines, linee)
 end
 
 if ide.wxver < "2.9.5" or not ide.config.autoanalizer then
-  IndicateAll = indicateFunctions28 end
+  IndicateAll = indicateFunctionsOnly end
 
 -- ----------------------------------------------------------------------------
 -- Create an editor
@@ -1130,6 +1133,14 @@ function CreateEditor()
   editor:Connect(wxstc.wxEVT_STC_ZOOM,
     function(event)
       editor:SetMarginWidth(margin.LINENUMBER, editor:TextWidth(DEFAULT_STYLE, "99999_"))
+      -- if Shift+Zoom is used, then zoom all editors, not just the current one
+      if wx.wxGetKeyState(wx.WXK_SHIFT) then
+        local zoom = editor:GetZoom()
+        for id, doc in pairs(openDocuments) do
+          -- check the editor zoom level to avoid recursion
+          if doc.editor:GetZoom() ~= zoom then doc.editor:SetZoom(zoom) end
+        end
+      end
       event:Skip()
     end)
 
