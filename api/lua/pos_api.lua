@@ -560,7 +560,7 @@ return {
                 args = "()",
                 returns = "str",
             },
-            font_str_width = {
+            font_get_string_width = {
                 type = "function",
                 args = "(font_name, font_charset, font_size, str)",
                 returns = "width (int)",
@@ -572,12 +572,23 @@ return {
  timeout=nil => infinite wait
  timeout=0 => read key immediately]],
                 args = "([timeout])",
-                returns = "key code or nil if keyboard buffer",
+                returns = "key code or nil if keyboard buffer is empty",
             },
-            get_string_width = {
+            get_str = {
                 type = "function",
-                args = "(font_name, font_charset, font_size, str)",
-                returns = "int",
+                description = [[
+ params:
+  D8(1/0)    Enable (disable) Left alignment with auto new line display
+  D7(1/0)    Prescribed content in StrBuf is (is not) take effective.
+  D6(1/0)    Upper (lower) case
+  D5(1/0)    Can (cannot) input numbers
+  D4(1/0)    Can (cannot) input characters
+  D3(1/0)    Is (is not) input password
+  D2(1/0)    Left (right) alignment
+  D1(1/0)    Having (not having) radix point
+  D0(1/0)    Reverse (Normal) display]],
+                args = "(params, min_len, max_len, timeout, def)",
+                returns = "str|nil,reason:'timeout' or 'cancel'",
             },
             init_comport_console = {
                 type = "function",
@@ -631,6 +642,11 @@ return {
                 type = "function",
                 args = "(str)",
                 returns = "int -- returns width of string with currently selected font size",
+            },
+            lcd_goto = {
+                type = "function",
+                args = "(x_off, line_no)",
+                returns = "none",
             },
             lcd_print = {
                 type = "function",
@@ -790,13 +806,8 @@ return {
                 returns = "true | nil, err_code",
             },
             mif_write = {
-                type = "function",
-                args = "(card_serial, key_type, key, bst, first_block_nr[,n_blocks=#bst:avail_to_read()/16])",
-                returns = "true | false, err_code, op, block_nr",
-            },
-            mif_write = {
-                type = "function",
-                args = "(card_serial, key_type, key, str, first_block_nr[,n_blocks=#str/16)",
+                type = "method",
+                args = "(card_serial, key_type, key, str|bst, first_block_nr [,n_blocks=#str/16|bst:avail_to_read()/16)",
                 returns = "true| false, err_code, op, block_nr",
             },
             mif_write_block = {
@@ -918,7 +929,7 @@ return {
                 returns = "true | false,err_code",
             },
             port_send = {
-                type = "function",
+                type = "method",
                 args = "(port_num, bst, [off = 0, len = bst:len() - off])",
                 returns = "true | false,err_code",
             },
@@ -1056,6 +1067,101 @@ return {
                 type = "function",
                 args = "()",
                 returns = "str",
+            },
+            wifi_get_cur_connect = {
+                type = "function",
+                description = [[
+typedef struct
+{
+    int     Status;             /*  port status:    0:Wlan adapter not present;
+                                                    1:Wlan adapter disabled;
+                                                    2:Searching for initial connection;
+                                                    4:Connected;
+                                                    5:Out of range      */
+    int     XferRate;           //  Transfer rate in the range 1..54
+    int     SigLevel;           //  signal level [%], in the range 0..100
+    int     LnkQual;            //  Link quality [%], in the range 0..100
+    char    SSID[64];           //  SSID
+    int     SecurityType;       //  The Wireless LAN security type.(0:No security; 1:WEP-64; 2:WEP-128; 3:WPA-TKIP; 4:WPA2-AES)
+    int     Channel;            //  Current communication channel
+} WiFiStatus_t;  // Wi-Fi连接状态]],
+                args = "()",
+                returns = "WiFiStatus_t|nil,err",
+            },
+            wifi_get_local_ip = {
+                type = "function",
+                args = "()",
+                returns = "str|nil,rc",
+            },
+            wifi_get_mac = {
+                type = "function",
+                args = "()",
+                returns = "str[6]|nil,rc",
+            },
+            wifi_ping = {
+                type = "function",
+                args = "(ip [, timeout_ms=2000])",
+                returns = "ping_ms|nil,rc",
+            },
+            wifi_scan_ap = {
+                type = "function",
+                description = [[
+typedef struct
+{
+    char    SSID[64];           //  SSID
+    int     SecurityType;       //  The Wireless LAN security type.(0:No security; 1:WEP-64; 2:WEP-128; 3:WPA-TKIP; 4:WPA2-AES)
+    int     SigStrength;        //  Signal strength, 0-low, 1-good, 2-excellent
+} WiFiAPInfo_t;      //  available ap info in surrounding area]],
+                args = "()",
+                returns = "array of WiFiAPInfo_t|nil,rc",
+            },
+            wifi_set_ap = {
+                type = "function",
+                description = [[
+typedef struct
+{
+    char    SSID[64];           //  SSID
+    int     SecurityType;       //  Sets the Wireless LAN security type.(0:No security; 1:WEP-64; 2:WEP-128; 3:WPA-TKIP; 4:WPA2-AES)
+    char    WPAPSK[64];         //  Personal Shared Key Pass-Phrase.
+    char    WEPKey[32];         //  WEP Key
+} WiFiAPx_t;       //  can be configured up to 10 sets(0~9), the default set is No.0.]],
+                args = "(index, WiFiAPx_t)",
+                returns = "true|nil,rc",
+            },
+            wifi_set_def_ap = {
+                type = "function",
+                description = [[
+typedef struct
+{
+    char    SSID[64];           //  SSID
+    int     WEPMode;            //  WEP mode: 0-disable; 1-enable 64-bit; 2-enable 128-bit
+    int     WEPKeyIdx;          //  WEP key index (1 - 4)
+    char    WEPKey[4][32];      //  4 sets of WEP Key
+    char    WPAPSK[64];         //  Personal Shared Key Pass-Phrase, ("":WPA security is disabled, else enable for WPA-PSK encryption key)
+} WiFiDefAP_t;]],
+                args = "(WiFiDefAP_t)",
+                returns = "true|nil,rc",
+            },
+            wifi_set_params = {
+                type = "function",
+                description = [[
+typedef struct
+{
+    int     IchipPowerSave;     //  Wi-Fi module (iChip) power save (0..255, 0:Disable Power Save mode, 1..255:seconds without any activity)
+    int     Channel;            //  Wireless LAN communication channel(0 - 13)
+    int     WLANPowerSave;      //  Wireless LAN Power Save. (0(default): WiFi chipset Power Save mode is disabled. 1-5:The number of beacon periods during chipset remains in Power Save mode.)
+    int     RoamingMode;        //  0(default):disable roaming mode, 1:enable roaming mode
+    int     PeriodicScanInt;    //  Periodic WiFi Scan Interval(1~3600, default=5)
+    int     RoamingLowSNR;      //  Sets a low SNR threshold for iChip in Roaming mode.(0 - 255dB, default:10dB)
+    int     RoamingHighSNR;     //  Sets a high SNR threshold for iChip in Roaming mode.(0 - 255dB, default:30dB)
+} WiFiConfig_t;      //  Wi-Fi通用参数设置]],
+                args = "(WiFiConfig_t)",
+                returns = "true|nil,rc",
+            },
+            wifi_soft_reset = {
+                type = "function",
+                args = "([mode=0])",
+                returns = "true|nil,rc",
             },
             wnet_check_sim = {
                 type = "function",
