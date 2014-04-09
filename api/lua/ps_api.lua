@@ -60,7 +60,7 @@ return {
      cur_heap_size -- current heap size
      heap_reserve -- heap reserved
      cur_heap_limit
-     max_avail_to_alloc]],
+     max_avail_to_alloc ]],
         args = "()",
         returns = "info table",
     },
@@ -141,7 +141,7 @@ return {
  function prequire(module_name)
    local ok, result = pcall(require, module_name)
    return ok and result or nil
- end]],
+ end ]],
         args = "(module_name)",
         returns = "module | nil, err",
     },
@@ -203,140 +203,140 @@ return {
         type = "lib",
         childs = {
             lines = {
-                type = "function",
+                type = "method",
                 description = "see file:lines()",
                 args = "()",
                 returns = "func",
             },
             pack = {
-                type = "function",
+                type = "method",
                 args = "(fmt, ...)",
                 returns = "none",
             },
             peek = {
-                type = "function",
+                type = "method",
                 args = "([max_length=1])",
                 returns = "str|nil",
             },
             read_whole_line = {
-                type = "function",
+                type = "method",
                 description = "return line or nil if no EOL in buffer",
                 args = "([dont_chop_eol = false])",
                 returns = "str|nil",
             },
             unpack = {
-                type = "function",
+                type = "method",
                 args = "(fmt)",
                 returns = "values",
             },
         }
-    }
+    },
     bin_stream = {
         type = "lib",
         childs = {
             grow_limit = {
-                type = "function",
+                type = "method",
                 args = "([new_grow_limit])",
                 returns = "int",
             },
             pack = {
-                type = "function",
+                type = "method",
                 args = "(fmt, ...)",
                 returns = "none",
             },
             set_grow_limit = {
-                type = "function",
+                type = "method",
                 args = "(new_grow_limit)",
                 returns = "self",
             },
             unpack = {
-                type = "function",
+                type = "method",
                 args = "(fmt)",
                 returns = "values",
             },
         }
-    }
+    },
     bst = {
         type = "lib",
         childs = {
             __concat = {
-                type = "function",
+                type = "method",
                 args = "(string|bst|file)",
                 returns = "new bst",
             },
             __eq = {
-                type = "function",
+                type = "method",
                 args = "(bst)",
                 returns = "bool",
             },
             __gc = {
-                type = "function",
+                type = "method",
                 args = "(variable streams only)",
             },
             __len = {
-                type = "function",
+                type = "method",
                 args = "(bst)",
                 returns = "int",
             },
             __tostring = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "string",
             },
             advance = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "self",
             },
             append = {
-                type = "function",
+                type = "method",
                 description = "same as put, but pos is set to read_limit",
                 args = "(args)",
             },
             append_to_file = {
-                type = "function",
+                type = "method",
                 args = "(file_name|file[,from_bst_offset=0[,len=read_limit-from_bst_offset[,close_file=false]])",
                 returns = "int (num written bytes)",
             },
             at_end = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "boolean",
             },
             base64_decode = {
-                type = "function",
+                type = "method",
                 description = "decode specified base64-encoded data into receiver",
                 args = "(str|bst|file [input_len=to_end_of_source])",
                 returns = "self",
             },
             base64_encode = {
-                type = "function",
+                type = "method",
                 description = "encode specified data into receiver",
                 args = "(str|bst|file [len=to_end_of_source])",
                 returns = "self",
             },
             can_grow = {
-                type = "function",
+                type = "method",
                 args = "([increment])",
                 returns = "bool",
             },
             capacity = {
-                type = "function",
+                type = "method",
                 args = "([new_capacity])",
                 returns = "int",
             },
             clear = {
-                type = "function",
+                type = "method",
                 args = "([shrink=false])",
                 returns = "self -- remove all readable data from buffer, set pos to 0",
             },
             close = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "bool release external memory if any, emulates file:close",
             },
             compress = {
-                type = "function",
+                type = "method",
                 args = "(obj, [off=0 [,len=#obj-off [,zlib_opts={level,method,window_bits,mem_level,strategy}]]])",
                 returns = "true | false, zlib_error_code",
             },
@@ -346,125 +346,125 @@ return {
                 returns = "bst",
             },
             copy_from = {
-                type = "function",
+                type = "method",
                 args = "(str | bst | file [,len=src_read_avail])",
                 returns = "int num bytes copied",
             },
             crc16 = {
-                type = "function",
+                type = "method",
                 args = "([initial_crc=0xFFFF [,off=0 [,len=read_limit-off]]])",
                 returns = "int",
             },
             crc16r = {
-                type = "function",
+                type = "method",
                 description = "reverse algorithm",
                 args = "([initial_crc=0xFFFF [,off=0 [,len=read_limit-off]]])",
                 returns = "int",
             },
             crc32 = {
-                type = "function",
+                type = "method",
                 args = "([initial_crc=0xFFFFFFFF [,off=0 [,len=read_limit-pos]]])",
                 returns = "int",
             },
             crc8 = {
-                type = "function",
+                type = "method",
                 args = "([initial_crc=0[,off=0[,len=read_limit-off]]])",
                 returns = "int",
             },
             endian = {
-                type = "function",
+                type = "method",
                 args = "([new_endian])",
                 returns = "string 'b'|'l'",
             },
             ensure = {
-                type = "function",
+                type = "method",
                 args = "(space)",
                 returns = "bst|nil (may be not receiver!) return nil if can not grow (grow_limit is checked)",
             },
             flush = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "bool do nothing, answer true",
             },
             get = {
-                type = "function",
+                type = "method",
                 description = "read one byte, return nil if no data avail",
                 args = "()",
                 returns = "int|nil",
             },
             get = {
-                type = "function",
+                type = "method",
                 description = "read string, return nil if no data avail",
                 args = "(size)",
                 returns = "string|nil",
             },
             get_callback_handler = {
-                type = "function",
+                type = "method",
                 args = "(handler)",
                 returns = "handler|nil",
             },
             hex_decode = {
-                type = "function",
+                type = "method",
                 description = "decode specified hex data into receiver",
                 args = "(str|bst|file [max_decoded_len=unlimited])",
                 returns = "self",
             },
             hex_encode = {
-                type = "function",
+                type = "method",
                 description = "encode specified data into receiver",
                 args = "(str|bst|file [len=to_end_of_source] [separator=''] [prefix=''])",
                 returns = "self",
             },
             insert = {
-                type = "function",
+                type = "method",
                 description = "insert data at current position. pos is moved according to len",
                 args = "(byte[,int repeat_count=1])",
                 returns = "self",
             },
             insert = {
-                type = "function",
+                type = "method",
                 description = "insert data at current position. pos is moved according to len",
                 args = "(file[,src_off=0[,src_len=file_len-off[,close_file=false]]])",
                 returns = "self",
             },
             insert = {
-                type = "function",
+                type = "method",
                 description = "insert data at current position. pos is moved according to len",
                 args = "(string|bst[,src_off=0[,src_len=src_size-off]])",
                 returns = "self",
             },
             is_empty = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "boolean",
             },
             is_fixed_size = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "bool",
             },
             len = {
-                type = "function",
+                type = "method",
                 args = "([new_len[,shrink_to_len=false]])",
                 returns = "int",
             },
             next_token = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "str",
             },
             peek_for = {
-                type = "function",
+                type = "method",
                 args = "(str)",
                 returns = "bool",
             },
             peek_for_any = {
-                type = "function",
+                type = "method",
                 args = "(charset)",
                 returns = "str|nil",
             },
             pos = {
-                type = "function",
+                type = "method",
                 description = "if new_pos is provided then set stream pos to specified value",
                 args = "([new_pos])",
                 returns = "int -- returns current pos",
@@ -475,38 +475,38 @@ return {
                 returns = "self",
             },
             put = {
-                type = "function",
+                type = "method",
                 args = "(byte [,count=1])",
                 returns = "self",
             },
             put = {
-                type = "function",
+                type = "method",
                 args = "(file [,src_off=0 [,src_len=file_len-off [,close_file=false]]])",
                 returns = "self",
             },
             put = {
-                type = "function",
+                type = "method",
                 args = "(str [,src_off=0 [,src_len=src_size-off])",
                 returns = "self",
             },
             read = {
-                type = "function",
+                type = "method",
                 description = [[
  see file:read
- extra fmt: *b -- read to bin_buffer]],
+ extra fmt: *b -- read to bin_buffer ]],
                 args = "(...)",
                 returns = "str | bin_buffer",
             },
             read_avail = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "int",
             },
             read_from_file = {
-                type = "function",
+                type = "method",
                 description = [[
  pos is updated to reflect readed data
- def_len is to end of file for variable stream and write_limit for fixed stream]],
+ def_len is to end of file for variable stream and write_limit for fixed stream ]],
                 args = "(file_name|file[,off=0[,len=def_len[,close_file=false]]]])",
                 returns = "number of bytes readed",
             },
@@ -517,25 +517,25 @@ return {
                 returns = "int (num of bytes readed)",
             },
             refill = {
-                type = "function",
+                type = "method",
                 description = "return nil if there is no available space",
                 args = "(file[,off=0[,len=min(file_len-off,capacity-read_avail)[,close_file=false]]])",
                 returns = "int (num of bytes readed)",
             },
             refill = {
-                type = "function",
+                type = "method",
                 description = "return nil if there is no available space",
                 args = "(str[,off=0[,len=min(source_len-off,capacity-remain_avail)]]])",
                 returns = "int (num of bytes readed)",
             },
             refill_from_file = {
-                type = "function",
+                type = "method",
                 description = "return nil if there is no space available",
                 args = "(file_name|file[,off=0[,len=min(file_len-off,capacity-read_limit)[,close_file=false]]])",
                 returns = "int num bytes readed",
             },
             remain = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "int return available to read byte count",
             },
@@ -545,70 +545,70 @@ return {
                 returns = "self",
             },
             rewind = {
-                type = "function",
+                type = "method",
                 description = "reset position to 0",
                 args = "()",
                 returns = "self",
             },
             seek = {
-                type = "function",
+                type = "method",
                 args = "(mode, offset)",
                 returns = "int see file:seek",
             },
             set_callback_handler = {
-                type = "function",
+                type = "method",
                 args = "(handler)",
                 returns = "handler",
             },
             set_capacity = {
-                type = "function",
+                type = "method",
                 args = "(new_capacity)",
                 returns = "self",
             },
             set_endian = {
-                type = "function",
+                type = "method",
                 args = "(endian)",
                 returns = "self -- endian is 'b[ig]', 'l[ittle]' or 'n[ative]'",
             },
             set_len = {
-                type = "function",
+                type = "method",
                 args = "(new_len[,shrink_to_len=false])",
                 returns = "self",
             },
             set_pos = {
-                type = "function",
+                type = "method",
                 description = "set new stream position. negative new_pos means set pos from end of readable data",
                 args = "(new_pos)",
                 returns = "self",
             },
             set_to_end = {
-                type = "function",
+                type = "method",
                 description = "seek to end of bst",
                 args = "()",
                 returns = "pos",
             },
             shrink = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "self -- reset cap to preallocated",
             },
             skip = {
-                type = "function",
+                type = "method",
                 args = "(num)",
                 returns = "int cur pos",
             },
             skip_any = {
-                type = "function",
+                type = "method",
                 args = "(chars)",
                 returns = "self",
             },
             skip_to = {
-                type = "function",
+                type = "method",
                 args = "(str)",
                 returns = "bool",
             },
             str = {
-                type = "function",
+                type = "method",
                 args = "([off=0[,len=read_limit-off]])",
                 returns = "str -- extract string from bst",
             },
@@ -629,45 +629,45 @@ return {
                 returns = "str",
             },
             to_hex = {
-                type = "function",
+                type = "method",
                 args = "([off=0] [len=read_limit-off] [separator=''] [prefix=''])",
                 returns = "hex str",
             },
             to_hex = {
-                type = "function",
+                type = "method",
                 args = "(spearator [prefix=''])",
                 returns = "hex str",
             },
             tokens = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "tokens iter",
             },
             up_to = {
-                type = "function",
+                type = "method",
                 description = "returns content from cur pos to first occurence of string",
                 args = "(str[,include_str=false])",
                 returns = "str, found",
             },
             up_to_any = {
-                type = "function",
+                type = "method",
                 args = "(charset[,include_char=false])",
                 returns = "str, found_char | nil if not found",
             },
             up_to_end = {
-                type = "function",
+                type = "method",
                 description = "returns content from cur pos to end",
                 args = "()",
                 returns = "str",
             },
             write = {
-                type = "function",
+                type = "method",
                 description = "see file:write. bin_buffer as argument also accepted",
                 args = "(args)",
                 returns = "self",
             },
             write_avail = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "int",
             },
@@ -675,12 +675,12 @@ return {
                 type = "method",
                 description = [[
  pos is unaffected
- writes at current file pos (or at beginning if file name provided)]],
+ writes at current file pos (or at beginning if file name provided) ]],
                 args = "(file_name|file[,bst_off=0[,bst_len=self:len()-off[,close_file=false]])",
                 returns = "int (num written bytes)",
             },
         }
-    }
+    },
     cache = {
         type = "lib",
         childs = {
@@ -716,7 +716,7 @@ return {
                 description = [[
  construct new cache with specified retrieve function
  retrieve function argument is key
- retrieve function should return value or nil if element can not be retrieved]],
+ retrieve function should return value or nil if element can not be retrieved ]],
                 args = "(retrieve_func [,default_element [,weak])",
                 returns = "cache",
             },
@@ -743,7 +743,7 @@ return {
                 returns = "weak_cache",
             },
         }
-    }
+    },
     des = {
         type = "lib",
         childs = {
@@ -753,82 +753,82 @@ return {
                 returns = "des_coder",
             },
         }
-    }
+    },
     des_coder = {
         type = "lib",
         childs = {
             decrypt = {
-                type = "function",
+                type = "method",
                 args = "(source [len=to_end_of_src] [dest_bst=bin_buffer(len)])",
                 returns = "bst",
             },
             encrypt = {
-                type = "function",
+                type = "method",
                 args = "(str|bst|file [len=to_end_of_source] [dest_bst])",
                 returns = "bst",
             },
             set_key = {
-                type = "function",
+                type = "method",
                 args = "(str)",
                 returns = "self",
             },
         }
-    }
+    },
     file = {
         type = "lib",
         childs = {
             atend = {
-                type = "function",
+                type = "method",
                 description = "answer is file at end",
                 args = "()",
                 returns = "bool",
             },
             fileno = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "int",
             },
             len = {
-                type = "function",
+                type = "method",
                 description = "return current file size",
                 args = "()",
                 returns = "int",
             },
             pack = {
-                type = "function",
+                type = "method",
                 args = "(fmt, ...)",
                 returns = "none",
             },
             peek = {
-                type = "function",
+                type = "method",
                 args = "([count=1])",
                 returns = "str|nil",
             },
             pos = {
-                type = "function",
+                type = "method",
                 description = [[
  get/set absolute pos
- negative new_pos -> from end of file]],
+ negative new_pos -> from end of file ]],
                 args = "([new_pos])",
                 returns = "int",
             },
             rewind = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "bool|nil, errmsg, errcode",
             },
             set_to_end = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "self",
             },
             unpack = {
-                type = "function",
+                type = "method",
                 args = "(fmt)",
                 returns = "values",
             },
         }
-    }
+    },
     fs = {
         type = "lib",
         childs = {
@@ -994,17 +994,7 @@ return {
                 args = "(...)",
             },
         }
-    }
-    gdbm = {
-        type = "lib",
-        childs = {
-            alloc_oid = {
-                type = "function",
-                args = "([num_oids_to_alloc = 1])",
-                returns = "oid",
-            },
-        }
-    }
+    },
     io = {
         type = "lib",
         childs = {
@@ -1024,18 +1014,18 @@ return {
                 returns = "bool",
             },
         }
-    }
+    },
     list = {
         type = "lib",
         childs = {
             add = {
-                type = "function",
+                type = "method",
                 description = "add element to a list",
                 args = "(elt)",
                 returns = "self",
             },
             addall = {
-                type = "function",
+                type = "method",
                 args = "(values)",
                 returns = "none",
             },
@@ -1046,78 +1036,78 @@ return {
                 returns = "table with list metatable",
             },
             clear = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "self",
             },
             clone = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "list",
             },
             concat = {
-                type = "function",
+                type = "method",
                 description = "see table.concat",
                 args = "([delim=''])",
                 returns = "str",
             },
             copy_without = {
-                type = "function",
+                type = "method",
                 args = "(element)",
                 returns = "list",
             },
             delete = {
-                type = "function",
+                type = "method",
                 args = "(from, [to=from])",
                 returns = "none",
             },
             detect = {
-                type = "function",
+                type = "method",
                 description = "find element matching func",
                 args = "(func)",
                 returns = "elt | nil",
             },
             each = {
-                type = "function",
+                type = "method",
                 description = "return iterator over receiver's values",
                 args = "()",
                 returns = "iter",
             },
             each = {
-                type = "function",
+                type = "method",
                 description = "evaluate specified function with each element in the receiver",
                 args = "(func)",
                 returns = "none",
             },
             equals = {
-                type = "function",
+                type = "method",
                 args = "(arg)",
                 returns = "bool",
             },
             filter = {
-                type = "function",
+                type = "method",
                 args = "(selector)",
                 returns = "list",
             },
             find_first = {
-                type = "function",
+                type = "method",
                 description = "find index of matching element",
                 args = "(func [, after_index = 0])",
                 returns = "index | nil",
             },
             find_last = {
-                type = "function",
+                type = "method",
                 description = "find index of matching element in reverse order",
                 args = "(func, [, before_index = #self + 1])",
                 returns = "index | nil",
             },
             first = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "first_element|nil",
             },
             fold = {
-                type = "function",
+                type = "method",
                 description = [[
  function list:fold(folding_func)
      local n = #self
@@ -1127,47 +1117,47 @@ return {
          val = folding_func(val, self[i])
      end
      return val
- end]],
+ end ]],
                 args = "(folding_func)",
                 returns = "value | nil",
             },
             index_of = {
-                type = "function",
+                type = "method",
                 args = "(elt [, after_index = 0])",
                 returns = "int | nil",
             },
             insert = {
-                type = "function",
+                type = "method",
                 args = "(elt, at_index)",
                 returns = "none",
             },
             is_empty = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "bool",
             },
             last = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "last_element | nil",
             },
             last_index_of = {
-                type = "function",
+                type = "method",
                 args = "(elt [, before_index=#self+1])",
                 returns = "int | nil",
             },
             map = {
-                type = "function",
+                type = "method",
                 args = "(func)",
                 returns = "list",
             },
             not_empty = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "bool",
             },
             occurences_of = {
-                type = "function",
+                type = "method",
                 args = "(elt)",
                 returns = "int",
             },
@@ -1178,94 +1168,94 @@ return {
                 returns = "list",
             },
             pop = {
-                type = "function",
+                type = "method",
                 description = [[
  remove last element from list and return it
- return nil if list is empty]],
+ return nil if list is empty ]],
                 args = "()",
                 returns = "removed_last_elt | nil",
             },
             prepend = {
-                type = "function",
+                type = "method",
                 args = "(elt)",
                 returns = "self",
             },
             pull = {
-                type = "function",
+                type = "method",
                 description = [[
  remove first element from list and return it
- return nil if list is empty]],
+ return nil if list is empty ]],
                 args = "()",
                 returns = "removed_first_element | nil",
             },
             rawequals = {
-                type = "function",
+                type = "method",
                 args = "(arg)",
                 returns = "bool",
             },
             reduce = {
-                type = "function",
+                type = "method",
                 args = "(value, func)",
                 returns = "value",
             },
             reject = {
-                type = "function",
+                type = "method",
                 args = "(discriminator_func)",
                 returns = "list",
             },
             remove = {
-                type = "function",
+                type = "method",
                 description = "remove element from list",
                 args = "(elt)",
                 returns = "elt",
             },
             remove_all_occurences_of = {
-                type = "function",
+                type = "method",
                 args = "(elt)",
                 returns = "int num removed elements",
             },
             remove_all_satisfying = {
-                type = "function",
+                type = "method",
                 description = "remove all matching elements from list",
                 args = "(func)",
                 returns = "int num removed",
             },
             reverse = {
-                type = "function",
+                type = "method",
                 description = "reverse element order in list",
                 args = "()",
                 returns = "self",
             },
             size = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "int",
             },
             sort = {
-                type = "function",
+                type = "method",
                 description = "see table.sort",
                 args = "([cmp=<])",
                 returns = "self",
             },
             sub = {
-                type = "function",
+                type = "method",
                 description = "extract part of list, similar to string.sub",
                 args = "([from = 1] [, to = #self])",
                 returns = "list",
             },
             swap = {
-                type = "function",
+                type = "method",
                 description = "swap elements in list",
                 args = "(index1, index2)",
                 returns = "self",
             },
             unpack = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "elements",
             },
         }
-    }
+    },
     math = {
         type = "lib",
         childs = {
@@ -1293,223 +1283,223 @@ return {
                 returns = "num",
             },
         }
-    }
+    },
     md5context = {
         type = "lib",
         childs = {
             final = {
-                type = "function",
+                type = "method",
                 args = "([binary_flag])",
                 returns = "str (hex digist) | bst (bin digest)",
             },
             update = {
-                type = "function",
+                type = "method",
                 args = "(file [,off=cur_file_pos [,len=to_eof]])",
                 returns = "self",
             },
             update = {
-                type = "function",
+                type = "method",
                 args = "(str|bst [,off=0 [,len=to_end]])",
                 returns = "self",
             },
         }
-    }
+    },
     odb = {
         type = "lib",
         childs = {
             abort_dbm = {
-                type = "function",
+                type = "method",
                 description = "close dbm unconditionally without writing any data",
                 args = "()",
                 returns = "none",
             },
             check_update_file = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "bool",
             },
             close_dbm = {
-                type = "function",
+                type = "method",
                 args = "([ignore_already_closed])",
             },
             collect_garbage = {
-                type = "function",
+                type = "method",
                 description = "perform garbage collection in oodb file.",
                 args = "()",
                 returns = "number of free pages in file",
             },
             ensure_stored = {
-                type = "function",
+                type = "method",
                 args = "(obj)",
                 returns = "stored persistent object",
             },
             extract_fields = {
-                type = "function",
+                type = "method",
                 args = "(oid, field_key[,field_key...]|array_of_keys)",
                 returns = "value[, value, ...]",
             },
             fetch = {
-                type = "function",
+                type = "method",
                 args = "(oid [,without_values = false])",
                 returns = "tbl",
             },
             fetch_ref = {
-                type = "function",
+                type = "method",
                 args = "(oid)",
                 returns = "tbl",
             },
             file_size = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "num",
             },
             get_oid = {
-                type = "function",
+                type = "method",
                 description = [[
  return oid of object
- object will be saved if no oid is assgned yet]],
+ object will be saved if no oid is assgned yet ]],
                 args = "(obj|oid)",
                 returns = "oid",
             },
             get_root_object = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "tbl",
             },
             is_valid_oid = {
-                type = "function",
+                type = "method",
                 args = "(oid)",
                 returns = "bool",
             },
             journal_size = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "num",
             },
             new_oid_array = {
-                type = "function",
+                type = "method",
                 args = "([meta])",
                 returns = "oid array",
             },
             open_dbm = {
-                type = "function",
+                type = "method",
                 description = [[
   mode:
    w: read/write, reate new file if not exists
    r: read only
-   c or n: read/write, create new file / truncate existing file]],
+   c or n: read/write, create new file / truncate existing file ]],
                 args = "(file_name, [mode=\"r\", [cache_size = 100])",
                 returns = "none",
             },
             opt = {
-                type = "function",
+                type = "method",
                 description = [[
  opts:
      sync_writes (bool)      -- sync phys file after saving page
-     grow_limit (uint)       -- file grow limit in bytes, 0 - no grow limit]],
+     grow_limit (uint)       -- file grow limit in bytes, 0 - no grow limit ]],
                 args = "(opt_name, [new_opt_value])",
                 returns = "opt value",
             },
             query_info = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "table",
             },
             read_values = {
-                type = "function",
+                type = "method",
                 args = "(oid)",
                 returns = "array",
             },
             restore = {
-                type = "function",
+                type = "method",
                 args = "(oid, with_values)",
                 returns = "tbl",
             },
             restore_values = {
-                type = "function",
+                type = "method",
                 args = "(pers_obj)",
             },
             store = {
-                type = "function",
+                type = "method",
                 args = "(data)",
                 returns = "persistent object",
             },
             sync = {
-                type = "function",
+                type = "method",
                 description = [[
  returns true if sync performed, answer false otherwise
- changes synced only if time since last write is greater than specified ttl]],
+ changes synced only if time since last write is greater than specified ttl ]],
                 args = "([max_pending_writes_ttl=0])",
                 returns = "bool",
             },
             trim_journal = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "none",
             },
             update_file_interval = {
-                type = "function",
+                type = "method",
                 description = "get[and set] file updating interval (file write frequency).",
                 args = "([new_update_file_interval])",
                 returns = "num",
             },
             was_closed_gracefully = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "bool",
             },
             wrap = {
-                type = "function",
+                type = "method",
                 args = "(obj, [meta])",
                 returns = "persistent stub",
             },
             write_values = {
-                type = "function",
+                type = "method",
                 args = "(oid, values)",
                 returns = "none",
             },
         }
-    }
+    },
     odbm = {
         type = "lib",
         childs = {
             backup = {
-                type = "function",
+                type = "method",
                 args = "(filename)",
                 returns = "none",
             },
             hash_of = {
-                type = "function",
+                type = "method",
                 args = "(object)",
                 returns = "uint32",
             },
             have_pending_writes = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "bool",
             },
             last_error = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "err_msg, err_code [, os_errno]",
             },
             odbm_begin = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "none",
             },
             odbm_commit = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "none",
             },
             odbm_commit_retaining = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "none",
             },
             odbm_rollback = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "none",
             },
@@ -1519,7 +1509,7 @@ return {
                 returns = "none",
             },
         }
-    }
+    },
     os = {
         type = "lib",
         childs = {
@@ -1538,7 +1528,7 @@ return {
      'windows'
      'pos'
      'linux'
-     'posix']],
+     'posix' ]],
             },
             progdir = {
                 type = "val",
@@ -1576,7 +1566,7 @@ return {
  r[pc] - rpc uuid format
  g[uid] - windows guid format
  w[indows]- windows guid format
- b[inary] - bin guid]],
+ b[inary] - bin guid ]],
                 args = "([format='hex'])",
                 returns = "str|nil if error",
             },
@@ -1599,7 +1589,7 @@ return {
                 type = "function",
                 description = [[
  set ENV_VAR_NAME=VALUE
- if there is no '=' in string then erase env var]],
+ if there is no '=' in string then erase env var ]],
                 args = "(env_str)",
                 returns = "none",
             },
@@ -1625,66 +1615,66 @@ return {
                 returns = "str",
             },
         }
-    }
+    },
     queue = {
         type = "lib",
         childs = {
             add = {
-                type = "function",
+                type = "method",
                 description = "add element to a queue",
                 args = "(elt)",
                 returns = "self",
             },
             clear = {
-                type = "function",
+                type = "method",
                 description = "remove all elements from queue",
                 args = "()",
                 returns = "self",
             },
             each = {
-                type = "function",
+                type = "method",
                 description = "return iterator over receiver's values",
                 args = "()",
                 returns = "iter",
             },
             each = {
-                type = "function",
+                type = "method",
                 description = "evaluate function with each element in the receiver",
                 args = "(func)",
                 returns = "none",
             },
             is_empty = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "bool",
             },
             next = {
-                type = "function",
+                type = "method",
                 description = [[
  remove first element from queue and return it
- return nil if queue is empty]],
+ return nil if queue is empty ]],
                 args = "()",
                 returns = "removed_first_element | nil",
             },
             not_empty = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "bool",
             },
             peek = {
-                type = "function",
+                type = "method",
                 description = "return first element in queue without removing it",
                 args = "()",
                 returns = "first_element | nil",
             },
             size = {
-                type = "function",
+                type = "method",
                 description = "answer number of elements in queue",
                 args = "()",
                 returns = "int",
             },
         }
-    }
+    },
     rsa = {
         type = "lib",
         childs = {
@@ -1707,7 +1697,7 @@ return {
                 type = "function",
                 description = [[
  answer required block size for encryption or decryption
- derection is e[ncryption] or d[ecryption]]],
+ derection is e[ncryption] or d[ecryption] ]],
                 args = "(key, direction)",
                 returns = "input_block_size, output_block_size",
             },
@@ -1718,47 +1708,47 @@ return {
                 returns = "key_bst",
             },
         }
-    }
+    },
     set = {
         type = "lib",
         childs = {
             add = {
-                type = "function",
+                type = "method",
                 description = "add element to a set",
                 args = "(elt)",
                 returns = "self",
             },
             addall = {
-                type = "function",
+                type = "method",
                 description = [[
  values can be a table or a function (iterator)
- for a table iterator will be constructed using each(table) ]],
+ for a table iterator will be constructed using each(table)  ]],
                 args = "(values)",
                 returns = "none",
             },
             clear = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "none",
             },
             each = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "iter",
             },
             each = {
-                type = "function",
+                type = "method",
                 description = "evaluate function with each element in the receiver",
                 args = "([func])",
                 returns = "none",
             },
             includes = {
-                type = "function",
+                type = "method",
                 args = "(elt)",
                 returns = "bool",
             },
             is_empty = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "bool",
             },
@@ -1769,18 +1759,18 @@ return {
                 returns = "set",
             },
             not_empty = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "bool",
             },
             remove = {
-                type = "function",
+                type = "method",
                 description = "remove element from set",
                 args = "(elt)",
                 returns = "none",
             },
             size = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "int",
             },
@@ -1791,119 +1781,119 @@ return {
                 returns = "weakset",
             },
         }
-    }
+    },
     str_builder = {
         type = "lib",
         childs = {
             addf = {
-                type = "function",
+                type = "method",
                 description = "shortcut to str_builder:add(string.format(format, ...))",
                 args = "(format, ...)",
                 returns = "str_builder",
             },
             builder = {
-                type = "function",
+                type = "method",
                 description = "for interop with string.builder(str)",
                 args = "()",
                 returns = "str_builder(the receiver)",
             },
             concat = {
-                type = "function",
+                type = "method",
                 args = "(str)",
                 returns = "str_builder(the receiver)",
             },
             remove_last = {
-                type = "function",
+                type = "method",
                 args = "()",
                 returns = "str_builder",
             },
             str = {
-                type = "function",
+                type = "method",
                 description = "construct string from collected pieces. if separator is specified then put it between each piece",
                 args = "([separator])",
                 returns = "str",
             },
             tostring = {
-                type = "function",
+                type = "method",
                 description = "construct string from collected pieces",
                 args = "()",
                 returns = "str",
             },
         }
-    }
+    },
     str_stream = {
         type = "lib",
         childs = {
             __tostring = {
-                type = "function",
+                type = "method",
                 description = "returns receiver's contents",
                 args = "()",
                 returns = "str",
             },
             atend = {
-                type = "function",
+                type = "method",
                 description = "answer true if the receiver's position is at end or answer false otherwise",
                 args = "()",
                 returns = "bool",
             },
             len = {
-                type = "function",
+                type = "method",
                 description = "return receiver's length",
                 args = "()",
                 returns = "int",
             },
             lines = {
-                type = "function",
+                type = "method",
                 description = "return iterator over receiver's lines",
                 args = "()",
                 returns = "iterator",
             },
             pos = {
-                type = "function",
+                type = "method",
                 description = [[
  return position of string stream
- if new_pos specified then set position to specified value]],
+ if new_pos specified then set position to specified value ]],
                 args = "([new_pos])",
                 returns = "int",
             },
             read = {
-                type = "function",
+                type = "method",
                 description = "see file:read()",
                 args = "(arg)",
                 returns = "str",
             },
             rewind = {
-                type = "function",
+                type = "method",
                 description = "set receiver's position to 0",
                 args = "()",
                 returns = "receiver",
             },
             seek = {
-                type = "function",
+                type = "method",
                 description = "change receiver's pos",
                 args = "([whence='cur' [,delta=0])",
                 returns = "int",
             },
             set_to_end = {
-                type = "function",
+                type = "method",
                 description = "set receiver's position to end",
                 args = "()",
                 returns = "receiver",
             },
             str = {
-                type = "function",
+                type = "method",
                 description = "return substring from receiver",
                 args = "([off=0, len=#self - off])",
                 returns = "str",
             },
             unpack = {
-                type = "function",
+                type = "method",
                 description = "see string.unpack",
                 args = "(fmt)",
                 returns = "values",
             },
         }
-    }
+    },
     string = {
         type = "lib",
         childs = {
@@ -1929,7 +1919,7 @@ return {
                 type = "function",
                 description = [[
   centers string within specified width
-  does not truncs if width less than str len]],
+  does not truncs if width less than str len ]],
                 args = "(str, width [,filler = \" \"])",
                 returns = "str",
             },
@@ -1996,7 +1986,7 @@ return {
                 type = "function",
                 description = [[
  pad string to specified size.
- width < 0 means right justify or trunc]],
+ width < 0 means right justify or trunc ]],
                 args = "(str, width [,pad_char=' '])",
                 returns = "str",
             },
@@ -2019,7 +2009,7 @@ return {
  align:
   '-' -- trim right and place '...' at rigth
   '+' -- trim left and place '...' at left
-  '*' -- trim center and place '...' at center]],
+  '*' -- trim center and place '...' at center ]],
                 args = "(str,width[,align='-'])",
                 returns = "str",
             },
@@ -2030,7 +2020,7 @@ return {
  default separator is whitespaces
  default max_pieces is unlimited
  returns list of trimmed (or untrimmed) pieces
- if max_pieces is not unlimited and resulting pieces less than max_pieces then return empty string for each remaining piece]],
+ if max_pieces is not unlimited and resulting pieces less than max_pieces then return empty string for each remaining piece ]],
                 args = "(string[,separator=<any blank>[,max_pieces=UNLIMITED[,untrimmed=false]]])",
                 returns = "pieces",
             },
@@ -2038,7 +2028,7 @@ return {
                 type = "function",
                 description = [[
  answer whenver string starts with specified prefix
- comparing is case sensitive]],
+ comparing is case sensitive ]],
                 args = "(string, prefix)",
                 returns = "bool",
             },
@@ -2123,18 +2113,18 @@ return {
                 type = "function",
                 description = [[
  wrap string to lines with length not more than max_line_length
- return string separated by \n or table of lines, according to to_table parameter]],
+ return string separated by \n or table of lines, according to to_table parameter ]],
                 args = "(str, max_line_length [,to_table = false])",
                 returns = "str|table",
             },
             wsub = {
-                type = "method",
+                type = "function",
                 description = "answer part of wide string",
                 args = "(str, [, from = 1 [, to = str:wlen()]])",
                 returns = "str",
             },
         }
-    }
+    },
     syslog = {
         type = "lib",
         childs = {
@@ -2231,7 +2221,7 @@ return {
      log.SEVERITY_INFO
      log.SEVERITY_WARNING
      log.SEVERITY_ERROR
-     log.SEVERITY_FATAL]],
+     log.SEVERITY_FATAL ]],
                 args = "([new_min_severity])",
                 returns = "min_severity (int)",
             },
@@ -2253,7 +2243,7 @@ return {
  redirect logging to com port 1
    params=nil => do not open port
    params=0 - default speed
-   params > 0 - custom speed]],
+   params > 0 - custom speed ]],
                 args = "([params])",
                 returns = "none",
             },
@@ -2276,7 +2266,7 @@ return {
                 returns = "bool",
             },
         }
-    }
+    },
     table = {
         type = "lib",
         childs = {
@@ -2294,7 +2284,7 @@ return {
                 type = "function",
                 description = [[
  set tbl's metatable to table
- raise error if table already has metatable]],
+ raise error if table already has metatable ]],
                 args = "(tbl)",
                 returns = "tbl",
             },
@@ -2315,7 +2305,7 @@ return {
                 description = [[
  extract fields from table and push it on stack
  typical example:
-     local arg1, arg2, arg3 = table.extract(function_args, 'arg1', 'arg2', 'arg3')]],
+     local arg1, arg2, arg3 = table.extract(function_args, 'arg1', 'arg2', 'arg3') ]],
                 args = "(table, field1 [fieldN...])",
                 returns = "field1 value...fieldN value",
             },
@@ -2328,7 +2318,7 @@ return {
                 type = "function",
                 description = [[
  delete object and shift remain indexed objects down
- elements compared using ==]],
+ elements compared using == ]],
                 args = "(table, object [, all = false] [, after_index = 0])",
                 returns = "object",
             },
@@ -2336,7 +2326,7 @@ return {
                 type = "function",
                 description = [[
  evaluate map_func for each seq value in table and put result in new table
- nil results from map_func are ignored. indexes shifted down ignored elements]],
+ nil results from map_func are ignored. indexes shifted down ignored elements ]],
                 args = "(table, map_func)",
                 returns = "table",
             },
@@ -2374,7 +2364,7 @@ return {
                 description = [[
  create a table instance
      narr - initial seq part capacity
-     nrec - initial hash part capacity]],
+     nrec - initial hash part capacity ]],
                 args = "(narr, nrec)",
                 returns = "table",
             },
@@ -2382,7 +2372,7 @@ return {
                 type = "function",
                 description = [[
  delete object and shift remain indexed objects down.
- elements compared using rawequal]],
+ elements compared using rawequal ]],
                 args = "(table, object [all = false] [after_index = 0])",
                 returns = "object",
             },
@@ -2402,7 +2392,7 @@ return {
                 type = "function",
                 description = [[
  answer true if seq parts of tables are equal
- values compared using rawequal]],
+ values compared using rawequal ]],
                 args = "(tbl1, tbl2)",
                 returns = "bool",
             },
@@ -2415,7 +2405,7 @@ return {
      end
      return value
  end
-]],
+ ]],
                 args = "(value, func)",
                 returns = "value",
             },
@@ -2428,7 +2418,7 @@ return {
                 type = "function",
                 description = [[
  answer true if seq parts of tables are equal
- values compared using ==]],
+ values compared using == ]],
                 args = "(tbl1, tbl2)",
                 returns = "bool",
             },
@@ -2436,7 +2426,7 @@ return {
                 type = "function",
                 description = [[
  create set from arguments
- similar to table.toset({...})]],
+ similar to table.toset({...}) ]],
                 args = "(...)",
                 returns = "table",
             },
@@ -2450,7 +2440,7 @@ return {
                 type = "function",
                 description = [[
  return sequence of table's values
- values order is unspecified]],
+ values order is unspecified ]],
                 args = "(table)",
                 returns = "table",
             },
@@ -2466,7 +2456,7 @@ return {
                 returns = "none",
             },
         }
-    }
+    },
     time = {
         type = "lib",
         childs = {
@@ -2497,7 +2487,7 @@ return {
  minute: 0-59
  second: 0-59
  millisecond: 1-999
- fraction_of_second: 0-0.9[9...]]],
+ fraction_of_second: 0-0.9[9...] ]],
                 args = "({year, (mon,day)|yday, hour, minute, second [fraction_of_second = 0] [timezone=<local_tz_offset>])}, [tz_offset = <local_tz_offset>])",
                 returns = "os time",
             },
@@ -2511,7 +2501,7 @@ return {
   F - opt seconds fraction with dot
   Z - opt millis with dot
   t - iso8061 conformant timestamp format (y-m-d'T'h:n:sFo')
-  ` - escapes next char]],
+  ` - escapes next char ]],
                 args = "([time=time.now()] [, format = 't' [, tz_offset = <local tz offset>]])",
                 returns = "str",
             },
@@ -2584,7 +2574,7 @@ return {
   s - second
   f - fraction_of_second
   z - millisecond
-  w - weekday]],
+  w - weekday ]],
                 args = "([time=time.now()], [format='ymdhnsz'] [,tz_offset = <local tz offset>])",
                 returns = "time parts",
             },
@@ -2594,7 +2584,7 @@ return {
                 returns = "int cur year",
             },
         }
-    }
+    },
     zlib = {
         type = "lib",
         childs = {
@@ -2606,7 +2596,7 @@ return {
   method: [Z_DEFLATED]
   windowBits: [15] -- negative value specifies zip-format data
   memLevel: [8]
-  strategy: [Z_DEFAULT_STRATEGY]]],
+  strategy: [Z_DEFAULT_STRATEGY] ]],
                 args = "(sink, compression_level, method, windowBits, memLevel, strategy)",
                 returns = "zlib_stream",
             },
@@ -2614,7 +2604,7 @@ return {
                 type = "function",
                 description = [[
  source: string | function | { read: function, close: function },
- window_bits: number, defautlt is 15]],
+ window_bits: number, defautlt is 15 ]],
                 args = "(source, window_bits)",
                 returns = "zlib_stream",
             },
@@ -2645,18 +2635,5 @@ return {
                 returns = "table of zip entries | nil, error, error_code",
             },
         }
-    }
-    zlib_stream = {
-        type = "lib",
-        childs = {
-            read = {
-                type = "function",
-                description = [[
-  see file:read()
- supported args: {number | '*l' | '*a'}*]],
-                args = "(args)",
-                returns = "str",
-            },
-        }
-    }
+    },
 }

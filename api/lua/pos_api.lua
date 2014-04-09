@@ -545,6 +545,23 @@ return {
             SO_BINDDEV = {type = "val"},
             SO_RCVTIMEO = {type = "val"},
             SO_SNDTIMEO = {type = "val"},
+            WIFI_SECURITY_NONE = {type = "val"},
+            WIFI_SECURITY_WEP128 = {type = "val"},
+            WIFI_SECURITY_WEP64 = {type = "val"},
+            WIFI_SECURITY_WPA2AES = {type = "val"},
+            WIFI_SECURITY_WPA2AES_E = {type = "val"},
+            WIFI_SECURITY_WPATKIP = {type = "val"},
+            WIFI_SECURITY_WPATKIP_E = {type = "val"},
+            WIFI_STATUS_CONNECTED = {type = "val"},
+            WIFI_STATUS_DISABLED = {type = "val"},
+            WIFI_STATUS_NOTPRESENT = {type = "val"},
+            WIFI_STATUS_OUTOFRANGE = {type = "val"},
+            WIFI_STATUS_SEARCHING = {type = "val"},
+            backlight = {
+                type = "function",
+                args = "([mode=pos.LIGHT_TIMER_MODE])",
+                returns = "none",
+            },
             beep = {
                 type = "function",
                 args = "(freq, ms)",
@@ -570,25 +587,9 @@ return {
                 description = [[
  read key from keyboard buffer
  timeout=nil => infinite wait
- timeout=0 => read key immediately]],
+ timeout=0 => read key immediately ]],
                 args = "([timeout])",
                 returns = "key code or nil if keyboard buffer is empty",
-            },
-            get_str = {
-                type = "function",
-                description = [[
- params:
-  D8(1/0)    Enable (disable) Left alignment with auto new line display
-  D7(1/0)    Prescribed content in StrBuf is (is not) take effective.
-  D6(1/0)    Upper (lower) case
-  D5(1/0)    Can (cannot) input numbers
-  D4(1/0)    Can (cannot) input characters
-  D3(1/0)    Is (is not) input password
-  D2(1/0)    Left (right) alignment
-  D1(1/0)    Having (not having) radix point
-  D0(1/0)    Reverse (Normal) display]],
-                args = "(params, min_len, max_len, timeout, def)",
-                returns = "str|nil,reason:'timeout' or 'cancel'",
             },
             init_comport_console = {
                 type = "function",
@@ -608,12 +609,23 @@ return {
                 args = "([cls=false])",
                 returns = "none",
             },
-            key_avail = {
+            input_str = {
                 type = "function",
-                args = "()",
-                returns = "bool",
+                description = [[
+ params:
+  D8(1/0)    Enable (disable) Left alignment with auto new line display
+  D7(1/0)    Prescribed content in StrBuf is (is not) take effective.
+  D6(1/0)    Upper (lower) case
+  D5(1/0)    Can (cannot) input numbers
+  D4(1/0)    Can (cannot) input characters
+  D3(1/0)    Is (is not) input password
+  D2(1/0)    Left (right) alignment
+  D1(1/0)    Having (not having) radix point
+  D0(1/0)    Reverse (Normal) display ]],
+                args = "(params, min_len, max_len, timeout, def)",
+                returns = "str|nil,reason:'timeout' or 'cancel'",
             },
-            lcd_big_font_selected = {
+            key_avail = {
                 type = "function",
                 args = "()",
                 returns = "bool",
@@ -648,6 +660,11 @@ return {
                 args = "(x_off, line_no)",
                 returns = "none",
             },
+            lcd_is_big_font_selected = {
+                type = "function",
+                args = "()",
+                returns = "bool",
+            },
             lcd_print = {
                 type = "function",
                 description = [[
@@ -659,7 +676,7 @@ return {
   'ALIGN_CENTER'
   'ALIGN_LEFT' (the default)
   'ALIGN_RIGHT'
- }]],
+ } ]],
                 args = "(x_pixel_offset, line_number, text, [bit_flags | [attr ...]])",
                 returns = "none",
             },
@@ -667,7 +684,7 @@ return {
                 type = "function",
                 description = [[
  print using small sys ascii font
- for attrs see pos.lcd_print()]],
+ for attrs see pos.lcd_print() ]],
                 args = "(x_pixel_offset, line_number, text, [bit_flags | [attr ...]])",
                 returns = "none",
             },
@@ -675,7 +692,7 @@ return {
                 type = "function",
                 description = [[
   print using big font, lines=4
-  for attrs see pos.lcd_print()]],
+  for attrs see pos.lcd_print() ]],
                 args = "(x_pixel_offset, line_number, text, [bit_flags | [attr ...]])",
                 returns = "none",
             },
@@ -683,7 +700,7 @@ return {
                 type = "function",
                 description = [[
  print using small font, lines=8
- for attrs see pos.lcd_print()]],
+ for attrs see pos.lcd_print() ]],
                 args = "(x_pixel_offset, line_number, text, [bit_flags | [attr ...]])",
                 returns = "none",
             },
@@ -698,7 +715,7 @@ return {
  select font size according to param
   param:
      'big'|'BIG'|'b'|'B' -- select big font
-     'small'|'SMALL'|'s'|'S' -- select small font]],
+     'small'|'SMALL'|'s'|'S' -- select small font ]],
                 args = "(param)",
                 returns = "none",
             },
@@ -725,7 +742,7 @@ return {
      pos.ICON_UP
      pos.ICON_DOWN
      pos.ICON_ETH
-     pos.ICON_MAIL]],
+     pos.ICON_MAIL ]],
                 args = "(icon, value)",
                 returns = "none",
             },
@@ -749,7 +766,7 @@ return {
      pos.ICON_UP
      pos.ICON_DOWN
      pos.ICON_ETH
-     pos.ICON_MAIL]],
+     pos.ICON_MAIL ]],
                 args = "(icon, [show=true])",
                 returns = "none",
             },
@@ -806,7 +823,7 @@ return {
                 returns = "true | nil, err_code",
             },
             mif_write = {
-                type = "method",
+                type = "function",
                 args = "(card_serial, key_type, key, str|bst, first_block_nr [,n_blocks=#str/16|bst:avail_to_read()/16)",
                 returns = "true| false, err_code, op, block_nr",
             },
@@ -855,17 +872,17 @@ return {
                 args = "(socket, len)",
                 returns = "received | nil, err_code",
             },
-            net_recv_timeout = {
-                type = "function",
-                args = "(socket, [new_timeout_ms])",
-                returns = "timeout_ms | nil, err_code",
-            },
             net_send = {
                 type = "function",
                 args = "(socket, data)",
                 returns = "number of bytes sent | nil, err_code",
             },
-            net_send_timeout = {
+            net_set_recv_timeout = {
+                type = "function",
+                args = "(socket, [new_timeout_ms])",
+                returns = "timeout_ms | nil, err_code",
+            },
+            net_set_send_timeout = {
                 type = "function",
                 args = "(socket, [new_timeout_ms])",
                 returns = "timeout_ms | nil, err_code",
@@ -889,11 +906,16 @@ return {
                 type = "function",
                 description = [[
  input from port: \n text to eval of num_bytes
- output: error or serialized eval result]],
+ output: error or serialized eval result ]],
                 args = "(num_bytes)",
                 returns = "result",
             },
             port_has_pending_input = {
+                type = "function",
+                args = "(port_num)",
+                returns = "bool | nil,err_code",
+            },
+            port_is_send_buffer_empty = {
                 type = "function",
                 args = "(port_num)",
                 returns = "bool | nil,err_code",
@@ -929,7 +951,7 @@ return {
                 returns = "true | false,err_code",
             },
             port_send = {
-                type = "method",
+                type = "function",
                 args = "(port_num, bst, [off = 0, len = bst:len() - off])",
                 returns = "true | false,err_code",
             },
@@ -942,11 +964,6 @@ return {
                 type = "function",
                 args = "(port_num, str, [off = 0, len = #str - off])",
                 returns = "true | false,err_code",
-            },
-            port_send_buffer_empty = {
-                type = "function",
-                args = "(port_num)",
-                returns = "bool | nil,err_code",
             },
             ppp_check = {
                 type = "function",
@@ -1084,7 +1101,7 @@ typedef struct
     char    SSID[64];           //  SSID
     int     SecurityType;       //  The Wireless LAN security type.(0:No security; 1:WEP-64; 2:WEP-128; 3:WPA-TKIP; 4:WPA2-AES)
     int     Channel;            //  Current communication channel
-} WiFiStatus_t;  // Wi-Fi连接状态]],
+} WiFiStatus_t;  // Wi-Fi连接状态 ]],
                 args = "()",
                 returns = "WiFiStatus_t|nil,err",
             },
@@ -1111,7 +1128,7 @@ typedef struct
     char    SSID[64];           //  SSID
     int     SecurityType;       //  The Wireless LAN security type.(0:No security; 1:WEP-64; 2:WEP-128; 3:WPA-TKIP; 4:WPA2-AES)
     int     SigStrength;        //  Signal strength, 0-low, 1-good, 2-excellent
-} WiFiAPInfo_t;      //  available ap info in surrounding area]],
+} WiFiAPInfo_t;      //  available ap info in surrounding area ]],
                 args = "()",
                 returns = "array of WiFiAPInfo_t|nil,rc",
             },
@@ -1124,7 +1141,7 @@ typedef struct
     int     SecurityType;       //  Sets the Wireless LAN security type.(0:No security; 1:WEP-64; 2:WEP-128; 3:WPA-TKIP; 4:WPA2-AES)
     char    WPAPSK[64];         //  Personal Shared Key Pass-Phrase.
     char    WEPKey[32];         //  WEP Key
-} WiFiAPx_t;       //  can be configured up to 10 sets(0~9), the default set is No.0.]],
+} WiFiAPx_t;       //  can be configured up to 10 sets(0~9), the default set is No.0. ]],
                 args = "(index, WiFiAPx_t)",
                 returns = "true|nil,rc",
             },
@@ -1138,7 +1155,7 @@ typedef struct
     int     WEPKeyIdx;          //  WEP key index (1 - 4)
     char    WEPKey[4][32];      //  4 sets of WEP Key
     char    WPAPSK[64];         //  Personal Shared Key Pass-Phrase, ("":WPA security is disabled, else enable for WPA-PSK encryption key)
-} WiFiDefAP_t;]],
+} WiFiDefAP_t; ]],
                 args = "(WiFiDefAP_t)",
                 returns = "true|nil,rc",
             },
@@ -1154,7 +1171,7 @@ typedef struct
     int     PeriodicScanInt;    //  Periodic WiFi Scan Interval(1~3600, default=5)
     int     RoamingLowSNR;      //  Sets a low SNR threshold for iChip in Roaming mode.(0 - 255dB, default:10dB)
     int     RoamingHighSNR;     //  Sets a high SNR threshold for iChip in Roaming mode.(0 - 255dB, default:30dB)
-} WiFiConfig_t;      //  Wi-Fi通用参数设置]],
+} WiFiConfig_t;      //  Wi-Fi通用参数设置 ]],
                 args = "(WiFiConfig_t)",
                 returns = "true|nil,rc",
             },
@@ -1234,5 +1251,5 @@ typedef struct
                 returns = "num | nil, err_code",
             },
         }
-    }
+    },
 }
