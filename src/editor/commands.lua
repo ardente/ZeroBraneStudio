@@ -10,7 +10,6 @@ local unpack = table.unpack or unpack
 
 local CURRENT_LINE_MARKER = StylesGetMarker("currentline")
 local CURRENT_LINE_MARKER_VALUE = 2^CURRENT_LINE_MARKER
-local BREAKPOINT_MARKER = StylesGetMarker("breakpoint")
 
 function NewFile(filename)
   filename = filename or ide.config.default.fullname
@@ -27,7 +26,7 @@ end
 -- Find an editor page that hasn't been used at all, eg. an untouched NewFile()
 local function findUnusedEditor()
   local editor
-  for id, document in pairs(openDocuments) do
+  for _, document in pairs(openDocuments) do
     if (document.editor:GetLength() == 0) and
     (not document.isModified) and (not document.filePath) and
     not (document.editor:GetReadOnly() == true) then
@@ -154,11 +153,50 @@ function LoadFile(filePath, editor, file_must_exist, skipselection)
   return editor
 end
 
+function ReLoadFile(filePath, editor, ...)
+  if not editor then return LoadFile(filePath, editor, ...) end
+
+  -- save all markers
+  local maskany = 2^24-1
+  local markers = {}
+  local line = editor:MarkerNext(0, maskany)
+  while line > -1 do
+    table.insert(markers, {line, editor:MarkerGet(line), editor:GetLine(line)})
+    line = editor:MarkerNext(line + 1, maskany)
+  end
+  local lines = editor:GetLineCount()
+
+  -- load file into the same editor
+  editor = LoadFile(filePath, editor, ...)
+  if not editor then return end
+
+  if #markers > 0 then -- restore all markers
+    local samelinecount = lines == editor:GetLineCount()
+    for _, marker in ipairs(markers) do
+      local line, mask, text = unpack(marker)
+      if samelinecount then
+        -- restore marker at the same line number
+        editor:MarkerAddSet(line, mask)
+      else
+        -- find matching line in the surrounding area and restore marker there
+        for _, l in ipairs({line, line-1, line-2, line+1, line+2}) do
+          if text == editor:GetLine(l) then
+            editor:MarkerAddSet(l, mask)
+            break
+          end
+        end
+      end
+    end
+  end
+
+  return editor
+end
+
 local function getExtsString()
   local knownexts = ""
-  for i,spec in pairs(ide.specs) do
+  for _,spec in pairs(ide.specs) do
     if (spec.exts) then
-      for n,ext in ipairs(spec.exts) do
+      for _,ext in ipairs(spec.exts) do
         knownexts = knownexts.."*."..ext..";"
       end
     end
@@ -174,11 +212,12 @@ function ReportError(msg)
 end
 
 function OpenFile(event)
-  local exts = getExtsString()
+  local editor = GetEditor()
+  local path = editor and ide:GetDocument(editor):GetFilePath() or nil
   local fileDialog = wx.wxFileDialog(ide.frame, TR("Open file"),
+    (path and GetPathWithSep(path) or FileTreeGetDir() or ""),
     "",
-    "",
-    exts,
+    getExtsString(),
     wx.wxFD_OPEN + wx.wxFD_FILE_MUST_EXIST)
   if fileDialog:ShowModal() == wx.wxID_OK then
     if not LoadFile(fileDialog:GetPath(), nil, true) then
@@ -304,7 +343,7 @@ function SaveFileAs(editor)
 end
 
 function SaveAll(quiet)
-  for id, document in pairs(openDocuments) do
+  for _, document in pairs(openDocuments) do
     local editor = document.editor
     local filePath = document.filePath
 
@@ -432,7 +471,7 @@ function SaveModifiedDialog(editor, allow_cancel)
 end
 
 function SaveOnExit(allow_cancel)
-  for id, document in pairs(openDocuments) do
+  for _, document in pairs(openDocuments) do
     if (SaveModifiedDialog(document.editor, allow_cancel) == wx.wxID_CANCEL) then
       return false
     end
@@ -508,9 +547,8 @@ function EnsureRangeVisible(posStart, posEnd)
 end
 
 function SetAllEditorsReadOnly(enable)
-  for id, document in pairs(openDocuments) do
-    local editor = document.editor
-    editor:SetReadOnly(enable)
+  for _, document in pairs(openDocuments) do
+    document.editor:SetReadOnly(enable)
   end
 end
 
@@ -518,9 +556,8 @@ end
 -- Debug related
 
 function ClearAllCurrentLineMarkers()
-  for id, document in pairs(openDocuments) do
-    local editor = document.editor
-    editor:MarkerDeleteAll(CURRENT_LINE_MARKER)
+  for _, document in pairs(openDocuments) do
+    document.editor:MarkerDeleteAll(CURRENT_LINE_MARKER)
   end
 end
 
@@ -601,7 +638,7 @@ end
 
 function GetOpenFiles()
   local opendocs = {}
-  for id, document in pairs(ide.openDocuments) do
+  for _, document in pairs(ide.openDocuments) do
     if (document.filePath) then
       local wxfname = wx.wxFileName(document.filePath)
       wxfname:Normalize()
@@ -620,7 +657,7 @@ function GetOpenFiles()
 end
 
 function SetOpenFiles(nametab,params)
-  for i,doc in ipairs(nametab) do
+  for _, doc in ipairs(nametab) do
     local editor = LoadFile(doc.filename,nil,true,true) -- skip selection
     if editor then editor:GotoPosDelayed(doc.cursorpos or 0) end
   end
@@ -694,7 +731,7 @@ end
 
 local function getOpenTabs()
   local opendocs = {}
-  for id, document in pairs(ide.openDocuments) do
+  for _, document in pairs(ide.openDocuments) do
     table.insert(opendocs, {
       filename = document.filePath,
       tabname = notebook:GetPageText(document.index),
@@ -716,10 +753,12 @@ function SetAutoRecoveryMark()
 end
 
 local function saveAutoRecovery(event)
-  if not ide.config.autorecoverinactivity or not ide.session.lastupdated then return end
-  if ide.session.lastupdated < (ide.session.lastsaved or 0)
-  or ide.session.lastupdated + ide.config.autorecoverinactivity > os.time()
-    then return end
+  local lastupdated = ide.session.lastupdated
+  if not ide.config.autorecoverinactivity or not lastupdated then return end
+  if lastupdated < (ide.session.lastsaved or 0) then return end
+
+  local now = os.time()
+  if lastupdated + ide.config.autorecoverinactivity > now then return end
 
   -- find all open modified files and save them
   local opentabs, params = getOpenTabs()
@@ -729,7 +768,7 @@ local function saveAutoRecovery(event)
     SettingsSaveFileSession({}, params)
     ide.settings:Flush()
   end
-  ide.session.lastsaved = os.time()
+  ide.session.lastsaved = now
   ide.frame.statusBar:SetStatusText(
     TR("Saved auto-recover at %s."):format(os.date("%H:%M:%S")), 1)
 end
@@ -860,6 +899,17 @@ frame:Connect(wx.wxEVT_TIMER, saveAutoRecovery)
 ide.editorApp:Connect(wx.wxEVT_ACTIVATE_APP,
   function(event)
     if not ide.exitingProgram then
+      -- wxSTC controls on OSX don't generate KILL_FOCUS events
+      -- when focus is switched between controls in the app;
+      -- manually kill focus when the app is deactivated
+      if ide.osname == 'Macintosh' and not event:GetActive() then
+        local ntbk = frame.bottomnotebook
+        for _,win in ipairs({ntbk.errorlog, ntbk.shellbox, GetEditor()}) do
+          local ev = wx.wxFocusEvent(wx.wxEVT_KILL_FOCUS)
+          win:GetEventHandler():ProcessEvent(ev)
+        end
+      end
+
       local event = event:GetActive() and "onAppFocusSet" or "onAppFocusLost"
       PackageEventHandle(event, ide.editorApp)
     end

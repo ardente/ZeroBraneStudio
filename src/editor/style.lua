@@ -51,7 +51,6 @@ function StylesGetDefault()
     calltip = nil,
 
     -- common special (need custom fg & bg)
-    calltipbg = nil,
     sel = {bg = {192, 192, 192}},
     caret = {fg = {0, 0, 0}},
     caretlinebg = {bg = {240, 240, 230}},
@@ -178,12 +177,6 @@ local specialmapping = {
     end
   end,
 
-  calltipbg = function(editor,style)
-    if (style.bg) then
-      editor:CallTipSetBackground(wx.wxColour(unpack(style.bg)))
-    end
-  end,
-
   fold = function(editor,style)
     local clrfg = style.fg and wx.wxColour(unpack(style.fg))
     local clrbg = style.bg and wx.wxColour(unpack(style.bg))
@@ -236,6 +229,30 @@ local specialmapping = {
       if style.fg then fg = wx.wxColour(unpack(style.fg)) end
       if style.bg then bg = wx.wxColour(unpack(style.bg)) end
       editor:MarkerDefine(id, ch, fg, bg)
+    end
+  end,
+
+  auxwindow = function(editor,style)
+    if not style then return end
+
+    local default = wxstc.wxSTC_STYLE_DEFAULT
+    local bg = style.bg and wx.wxColour(unpack(style.bg)) or editor:StyleGetBackground(default)
+    local fg = style.fg and wx.wxColour(unpack(style.fg)) or editor:StyleGetForeground(default)
+
+    local uimgr = ide.frame.uimgr
+    local panes = uimgr:GetAllPanes()
+    for index = 0, panes:GetCount()-1 do
+      local wind = uimgr:GetPane(panes:Item(index).name).window
+      local children = wind:GetChildren()
+      for child = 0, children:GetCount()-1 do
+        local data = children:Item(child):GetData()
+        local _, window = pcall(function() return data:DynamicCast("wxWindow") end)
+        if window then
+          window:SetBackgroundColour(bg)
+          window:SetForegroundColour(fg)
+          window:Refresh()
+        end
+      end
     end
   end,
 }
@@ -315,6 +332,9 @@ function StylesApplyToEditor(styles,editor,font,fontitalic,lexerconvert)
   -- normal selection (sel) attributes are set, so handle them again
   if styles.seladd then specialmapping.seladd(editor, styles.seladd) end
 
+  -- calltip has a special style that needs to be enabled
+  if styles.calltip then editor:CallTipUseStyle(2) end
+
   do
     local defaultfg = styles.text and styles.text.fg or {127,127,127}
     local indic = styles.indicator or {}
@@ -342,19 +362,17 @@ function ReApplySpecAndStyles()
   -- these styles need to be updated as they are based on comment styles
   if MarkupAddStyles then MarkupAddStyles(ide.config.styles) end
 
+  local errorlog = ide.frame.bottomnotebook.errorlog
+  local shellbox = ide.frame.bottomnotebook.shellbox
+  SetupKeywords(shellbox,"lua",nil,ide.config.stylesoutshell,ide.font.oNormal,ide.font.oItalic)
+  StylesApplyToEditor(ide.config.stylesoutshell,errorlog,ide.font.oNormal,ide.font.oItalic)
+
   local openDocuments = ide.openDocuments
   for i,doc in pairs(openDocuments) do
     if (doc.editor.spec) then
       SetupKeywords(doc.editor,nil,doc.editor.spec)
     end
   end
-
-  local errorlog = ide.frame.bottomnotebook.errorlog
-  local shellbox = ide.frame.bottomnotebook.shellbox
-
-  SetupKeywords(shellbox,"lua",nil,ide.config.stylesoutshell,ide.font.oNormal,ide.font.oItalic)
-
-  StylesApplyToEditor(ide.config.stylesoutshell,errorlog,ide.font.oNormal,ide.font.oItalic)
 end
 
 function ApplyStyleConfig(config, style)
@@ -399,31 +417,3 @@ function ApplyStyleConfig(config, style)
     ReApplySpecAndStyles()
   end
 end
-
-function LoadStyleConfig()
-  local fileDialog = wx.wxFileDialog(ide.frame, "Open Config File",
-    "/cfg",
-    "",
-    "Lua file (*.lua)|*.lua|All files (*)|*",
-    wx.wxFD_OPEN + wx.wxFD_FILE_MUST_EXIST)
-  if fileDialog:ShowModal() == wx.wxID_OK then
-    ApplyStyleConfig(fileDialog:GetPath())
-  end
-  fileDialog:Destroy()
-end
-
---[[
-  wxSTC_LUA_DEFAULT 0
-  wxSTC_LUA_COMMENT 1
-  wxSTC_LUA_COMMENTLINE 2
-  wxSTC_LUA_COMMENTDOC 3
-  wxSTC_LUA_NUMBER 4
-  wxSTC_LUA_WORD 5
-  wxSTC_LUA_STRING 6
-  wxSTC_LUA_CHARACTER 7
-  wxSTC_LUA_LITERALSTRING 8
-  wxSTC_LUA_PREPROCESSOR 9
-  wxSTC_LUA_OPERATOR 10
-  wxSTC_LUA_IDENTIFIER 11
-  wxSTC_LUA_STRINGEOL 12
---]]

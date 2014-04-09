@@ -108,7 +108,7 @@ end
 -- also fixes function descriptions
 
 local function formatUpToX(s, x)
-  local splitstr = "([ \t]*)(%S+)([ \t]*)(\n?)"
+  local splitstr = "([ \t]*)(%S*)([ \t]*)(\n?)"
   local t = {""}
   for prefix, word, suffix, newline in s:gmatch(splitstr) do
     if #(t[#t]) + #prefix + #word > x and #t > 0 then
@@ -220,7 +220,8 @@ local function resolveAssign(editor,tx)
     if (key and rest and tab.childs and tab.childs[key]) then
       return getclass(tab.childs[key],rest)
     end
-    if (tab.valuetype) then
+    -- process valuetype, but only if it doesn't reference the current tab
+    if (tab.valuetype and tab ~= ac.childs[tab.valuetype]) then
       return getclass(ac,tab.valuetype.."."..a)
     end
     return tab,a
@@ -269,7 +270,7 @@ function GetTipInfo(editor, content, short, fullmatch)
 
   -- try to resolve the class
   content = content:gsub("%b[]",".0")
-  local tab, rest = resolveAssign(editor, content)
+  local tab = resolveAssign(editor, content)
 
   local caller = content:match("([%w_]+)%(?%s*$")
   local class = (tab and tab.classname
@@ -414,7 +415,6 @@ end
 local cachemain = {}
 local cachemethod = {}
 local laststrategy
-local lastmethod
 local function getAutoCompApiList(childs,fragment,method)
   fragment = fragment:lower()
   local strategy = ide.config.acandtip.strategy
@@ -501,10 +501,6 @@ local function getAutoCompApiList(childs,fragment,method)
   end
 
   return t
-end
-
-function ClearAutoCompCache()
-  cache = {}
 end
 
 -- make syntype dependent

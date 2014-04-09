@@ -2,8 +2,6 @@
 -- authors: Lomtik Software (J. Winwood & John Labenski)
 -- Luxinia Dev (Eike Decker & Christoph Kubisch)
 ---------------------------------------------------------
-local wxkeywords = nil -- a string of the keywords for scintilla of wxLua's wx.XXX items
-
 local editorID = 100 -- window id to create editor pages with, incremented for new editors
 
 local openDocuments = ide.openDocuments
@@ -125,7 +123,7 @@ local function isFileAlteredOnDisk(editor)
             GetIDEString("editormessage"),
             wx.wxYES_NO + wx.wxCENTRE, ide.frame)
 
-        if ret ~= wx.wxYES or LoadFile(filePath, editor, true) then
+        if ret ~= wx.wxYES or ReLoadFile(filePath, editor, true) then
           openDocuments[id].modTime = GetFileModTime(filePath)
         end
       end
@@ -325,16 +323,16 @@ local function callTipFitAndShow(editor, pos, tip)
   -- find the longest line in terms of width in pixels.
   local maxwidth = 0
   local lines = {}
-  for line in tip:gmatch("[^\n]+") do
+  for line in tip:gmatch("[^\n]*\n?") do
     local width = editor:TextWidth(wxstc.wxSTC_STYLE_DEFAULT, line)
     if width > maxwidth then maxwidth = width end
     table.insert(lines, line)
     if #lines >= maxlines then
-      lines[#lines] = lines[#lines]..'...'
+      lines[#lines] = lines[#lines]:gsub("%s*\n$","")..'...'
       break
     end
   end
-  tip = table.concat(lines, "\n")
+  tip = table.concat(lines, '')
 
   local startpos = editor:PositionFromLine(editor:LineFromPosition(pos))
   local afterwidth = editor:GetSize():GetWidth()-point:GetX()
@@ -453,7 +451,7 @@ function IndicateIfNeeded()
   local editor = GetEditor()
   -- do the current one first
   if delayed[editor] then return IndicateAll(editor) end
-  for editor in pairs(delayed) do return IndicateAll(editor) end
+  for ed in pairs(delayed) do return IndicateAll(ed) end
 end
 
 -- find all instances of a symbol at pos
@@ -547,9 +545,12 @@ function IndicateAll(editor, lines, linee)
     while vars do
       for name, var in pairs(vars) do
         -- remove all variables that are created later than the current pos
-        while type(var) == 'table' and var.fpos and (var.fpos > pos) do
-          var = var.masked -- restored a masked var
-          vars[name] = var
+        -- skip all non-variable elements from the vars table
+        if type(name) == 'string' then
+          while type(var) == 'table' and var.fpos and (var.fpos > pos) do
+            var = var.masked -- restored a masked var
+            vars[name] = var
+          end
         end
       end
       vars = getmetatable(vars) and getmetatable(vars).__index
@@ -614,7 +615,7 @@ function IndicateAll(editor, lines, linee)
   end
 
   -- clear indicators till the end of processed fragment
-  local pos = delayed[editor] and delayed[editor][1] or editor:GetLength()+1
+  pos = delayed[editor] and delayed[editor][1] or editor:GetLength()+1
 
   -- don't clear "masked" indicators as those can be set out of order (so
   -- last updated fragment is not always the last in terms of its position);
@@ -624,7 +625,7 @@ function IndicateAll(editor, lines, linee)
   return delayed[editor] ~= nil -- request more events if still need to work
 end
 
-if ide.wxver < "2.9.5" or not ide.config.autoanalizer then
+if ide.wxver < "2.9.5" or not ide.config.autoanalyzer then
   IndicateAll = indicateFunctionsOnly end
 
 -- ----------------------------------------------------------------------------
@@ -632,7 +633,7 @@ if ide.wxver < "2.9.5" or not ide.config.autoanalizer then
 function CreateEditor()
   local editor = wxstc.wxStyledTextCtrl(notebook, editorID,
     wx.wxDefaultPosition, wx.wxSize(0, 0),
-    wx.wxBORDER_STATIC)
+    wx.wxBORDER_NONE)
 
   editorID = editorID + 1 -- increment so they're always unique
 
@@ -693,6 +694,7 @@ function CreateEditor()
 
   editor:SetMarginWidth(margin.MARKER, 16)
   editor:SetMarginType(margin.MARKER, wxstc.wxSTC_MARGIN_SYMBOL)
+  editor:SetMarginMask(margin.MARKER, bit.bnot(wxstc.wxSTC_MASK_FOLDERS))
   editor:SetMarginSensitive(margin.MARKER, true)
 
   editor:MarkerDefine(StylesGetMarker("currentline"))
@@ -769,10 +771,10 @@ function CreateEditor()
   editor:Connect(wxstc.wxEVT_STC_MARGINCLICK,
     function (event)
       local line = editor:LineFromPosition(event:GetPosition())
-      local margin = event:GetMargin()
-      if margin == 1 then
+      local marginno = event:GetMargin()
+      if marginno == margin.MARKER then
         DebuggerToggleBreakpoint(editor, line)
-      elseif margin == 2 then
+      elseif marginno == margin.FOLD then
         if wx.wxGetKeyState(wx.WXK_SHIFT) and wx.wxGetKeyState(wx.WXK_CONTROL) then
           FoldSome()
         else
@@ -873,9 +875,9 @@ function CreateEditor()
 
       elseif ide.config.autocomplete then -- code completion prompt
         local trigger = linetxtopos:match("["..editor.spec.sep.."%w_]+$")
-        if (trigger and (#trigger > 1 or trigger:match("["..editor.spec.sep.."]"))) then
-          editor.autocomplete = true
-        end
+        -- make sure .autocomplete is never `nil` or editor.autocomplete fails
+        editor.autocomplete = trigger and (#trigger > 1 or trigger:match("["..editor.spec.sep.."]"))
+          and true or false
       end
     end)
 
@@ -1009,7 +1011,10 @@ function CreateEditor()
         firstvisible)
       MarkupStyle(editor,minupdated or firstline,lastline)
       editor.ev = {}
+    end)
 
+  editor:Connect(wx.wxEVT_IDLE,
+    function (event)
       -- show auto-complete if needed
       if editor.autocomplete then
         EditorAutoComplete(editor)
@@ -1093,8 +1098,18 @@ function CreateEditor()
         and (mod == wx.wxMOD_NONE) then
         -- Delete and Backspace behave the same way for selected text
         if #(editor:GetSelectedText()) > 0 then
-          editor:SetTargetStart(editor:GetSelectionStart())
-          editor:SetTargetEnd(editor:GetSelectionEnd())
+          local length = editor:GetLength()
+          local selections = ide.wxver >= "2.9.5" and editor:GetSelections() or 1
+          editor:Clear() -- remove selected fragments
+
+          -- check if the modification has failed, which may happen
+          -- if there is "invisible" text in the selected fragment.
+          -- if there is only one selection, then delete manually.
+          if length == editor:GetLength() and selections == 1 then
+            editor:SetTargetStart(editor:GetSelectionStart())
+            editor:SetTargetEnd(editor:GetSelectionEnd())
+            editor:ReplaceTarget("")
+          end
         else
           local pos = editor:GetCurrentPos()
           if keycode == wx.WXK_BACK then
@@ -1114,8 +1129,8 @@ function CreateEditor()
 
           editor:SetTargetStart(pos)
           editor:SetTargetEnd(pos+1)
+          editor:ReplaceTarget("")
         end
-        editor:ReplaceTarget("")
       elseif mod == wx.wxMOD_ALT and keycode == wx.WXK_LEFT then
         -- if no "jump back" is needed, then do normal processing as this
         -- combination can be mapped to some action
@@ -1135,7 +1150,7 @@ function CreateEditor()
   local function selectAllInstances(instances, name, curpos)
     local this
     local idx = 0
-    for i, pos in pairs(instances) do
+    for _, pos in pairs(instances) do
       pos = pos - 1 -- positions are 0-based in Scintilla
       if idx == 0 then
         -- clear selections first as there seems to be a bug (Scintilla 3.2.3)
@@ -1175,7 +1190,7 @@ function CreateEditor()
       -- if Shift+Zoom is used, then zoom all editors, not just the current one
       if wx.wxGetKeyState(wx.WXK_SHIFT) then
         local zoom = editor:GetZoom()
-        for id, doc in pairs(openDocuments) do
+        for _, doc in pairs(openDocuments) do
           -- check the editor zoom level to avoid recursion
           if doc.editor:GetZoom() ~= zoom then doc.editor:SetZoom(zoom) end
         end
@@ -1315,25 +1330,6 @@ function SetupKeywords(editor, ext, forcespec, styles, font, fontitalic)
       for i,words in ipairs(spec.keywords) do
         editor:SetKeyWords(i-1,words)
       end
-    end
-
-    if (spec.api == "lua") then
-      -- Get the items in the global "wx" table for autocompletion
-      if not wxkeywords then
-        local keyword_table = {}
-        for index in pairs(wx) do
-          table.insert(keyword_table, "wx."..index.." ")
-        end
-
-        for index in pairs(wxstc) do
-          table.insert(keyword_table, "wxstc."..index.." ")
-        end
-
-        table.sort(keyword_table)
-        wxkeywords = table.concat(keyword_table)
-      end
-      local offset = spec.keywords and #spec.keywords or 5
-      editor:SetKeyWords(offset, wxkeywords)
     end
 
     editor.api = GetApi(spec.apitype or "none")
