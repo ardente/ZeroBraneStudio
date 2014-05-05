@@ -196,16 +196,12 @@ function FileSysGetRecursive(path, recursive, spec, skip)
   end
   getDir(path, spec)
 
-  -- explicitly sort files on Linux; directories first
-  if ide.osname == 'Unix' then
-    table.sort(content, function(a,b)
-      local ad, bd = a:sub(-1) == sep, b:sub(-1) == sep
-      -- both are folders or both are files
-      if ad and bd or not ad and not bd then return a < b
-      -- only one is folder; return true if it's the first one
-      else return ad end
-    end)
+  local prefix = '\001' -- prefix to sort directories first
+  local shadow = {}
+  for _, v in ipairs(content) do
+    shadow[v] = (v:sub(-1) == sep and prefix or '')..v:lower()
   end
+  table.sort(content, function(a,b) return shadow[a] < shadow[b] end)
 
   return content
 end
@@ -463,4 +459,14 @@ function GetEditorWithFocus()
          ctrl:GetParent():GetId() == e:GetId()) then editor = e end
   end
   return editor or nil
+end
+
+function GenerateProgramFilesPath(exec, sep)
+  local env = os.getenv('ProgramFiles')
+  return
+    (env and env..'\\'..exec..sep or '')..
+    [[C:\Program Files\]]..exec..sep..
+    [[D:\Program Files\]]..exec..sep..
+    [[C:\Program Files (x86)\]]..exec..sep..
+    [[D:\Program Files (x86)\]]..exec
 end

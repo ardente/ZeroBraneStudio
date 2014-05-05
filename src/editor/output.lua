@@ -23,6 +23,13 @@ errorlog:SetMarginType(1, wxstc.wxSTC_MARGIN_SYMBOL)
 errorlog:MarkerDefine(StylesGetMarker("message"))
 errorlog:MarkerDefine(StylesGetMarker("prompt"))
 errorlog:SetReadOnly(true)
+if (ide.config.outputshell.usewrap) then
+  errorlog:SetWrapMode(wxstc.wxSTC_WRAP_WORD)
+  errorlog:SetWrapStartIndent(0)
+  errorlog:SetWrapVisualFlags(wxstc.wxSTC_WRAPVISUALFLAG_END)
+  errorlog:SetWrapVisualFlagsLocation(wxstc.wxSTC_WRAPVISUALFLAGLOC_END_BY_TEXT)
+end
+
 StylesApplyToEditor(ide.config.stylesoutshell,errorlog,ide.font.oNormal,ide.font.oItalic)
 
 function ClearOutput()
@@ -91,7 +98,8 @@ function CommandLineToShell(uid,state)
 end
 
 -- logic to "unhide" wxwidget window using winapi
-pcall(function () return require 'winapi' end)
+pcall(require, 'winapi')
+local checkstart, checknext, checkperiod
 local pid = nil
 local function unHideWindow(pidAssign)
   -- skip if not configured to do anything
@@ -100,6 +108,18 @@ local function unHideWindow(pidAssign)
     pid = pidAssign > 0 and pidAssign or nil
   end
   if pid and winapi then
+    local now = TimeGet()
+    if pidAssign and pidAssign > 0 then
+      checkstart, checknext, checkperiod = now, now, 0.02
+    end
+    if now - checkstart > 1 and checkperiod < 0.5 then
+      checkperiod = checkperiod * 2
+    end
+    if now >= checknext then
+      checknext = now + checkperiod
+    else
+      return
+    end
     local wins = winapi.find_all_windows(function(w)
       return w:get_process():get_pid() == pid
     end)
@@ -292,7 +312,7 @@ errorlog:Connect(wx.wxEVT_END_PROCESS, function(event)
 
 errorlog:Connect(wx.wxEVT_IDLE, function()
     if (#streamins or #streamerrs) then getStreams() end
-    unHideWindow()
+    if ide.osname == 'Windows' then unHideWindow() end
   end)
 
 local jumptopatterns = {
@@ -342,12 +362,14 @@ errorlog:Connect(wxstc.wxEVT_STC_DOUBLECLICK,
         editor:GotoPos(editor:PositionFromLine(math.max(0,jumpline-1))
           + (jumplinepos and (math.max(0,jumplinepos-1)) or 0))
         editor:SetFocus()
-
-        -- doubleclick can set selection, so reset it
-        errorlog:SetSelection(event:GetPosition(), event:GetPosition())
-        event:Skip()
       end
     end
+
+    -- doubleclick can set selection, so reset it;
+    -- for consistency, do it even when no pattern is detected.
+    local pos = event:GetPosition()
+    if pos == -1 then pos = errorlog:GetLineEndPosition(event:GetLine()) end
+    errorlog:SetSelection(pos, pos)
   end)
 
 local function positionInLine(line)

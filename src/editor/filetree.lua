@@ -78,9 +78,11 @@ local function treeAddDir(tree,parent_id,rootdir)
   end
 
   -- cache the mapping from names to tree items
-  local data = wx.wxLuaTreeItemData()
-  data:SetData(cache)
-  tree:SetItemData(parent_id, data)
+  if ide.wxver >= "2.9.5" then
+    local data = wx.wxLuaTreeItemData()
+    data:SetData(cache)
+    tree:SetItemData(parent_id, data)
+  end
 
   tree:SetItemHasChildren(parent_id,
     tree:GetChildrenCount(parent_id, false) > 0)
@@ -141,6 +143,7 @@ local function treeSetConnectorsAndIcons(tree)
   function tree:IsDirectory(item_id) return isIt(item_id, IMG_DIRECTORY) end
   function tree:IsFileKnown(item_id) return isIt(item_id, IMG_FILE_KNOWN) end
   function tree:IsFileOther(item_id) return isIt(item_id, IMG_FILE_OTHER) end
+  function tree:IsRoot(item_id) return not tree:GetItemParent(item_id):IsOk() end
 
   function tree:GetItemFullName(item_id)
     local tree = self
@@ -292,17 +295,28 @@ local function treeSetConnectorsAndIcons(tree)
       local item_id = event:GetItem()
       tree:SelectItem(item_id)
 
+      local renamelabel = tree:IsRoot(item_id) and
+        TR("&Edit Project Directory") or TR("&Rename")
       local menu = wx.wxMenu {
         { ID_NEWFILE, TR("New &File") },
         { ID_NEWDIRECTORY, TR("&New Directory") },
         { },
-        { ID_RENAMEFILE, TR("&Rename")..KSC(ID_RENAMEFILE) },
+        { ID_RENAMEFILE, renamelabel..KSC(ID_RENAMEFILE) },
         { ID_DELETEFILE, TR("&Delete")..KSC(ID_DELETEFILE) },
         { },
         { ID_OPENEXTENSION, TR("Open With Default Program") },
         { ID_COPYFULLPATH, TR("Copy Full Path") },
         { ID_SHOWLOCATION, TR("Show Location") },
       }
+      local projectdirectorymenu = wx.wxMenu({
+        { },
+        {ID_PROJECTDIRCHOOSE, TR("Choose...")..KSC(ID_PROJECTDIRCHOOSE), TR("Choose a project directory")},
+      })
+      local projectdirectory = wx.wxMenuItem(menu, ID_PROJECTDIR,
+        TR("Project Directory"), TR("Set the project directory to be used"),
+        wx.wxITEM_NORMAL, projectdirectorymenu)
+      menu:Insert(6, projectdirectory)
+      FileTreeProjectListUpdate(projectdirectorymenu, 0)
 
       local function addItem(item_id, name, image)
         local isdir = tree:GetItemImage(item_id) == IMG_DIRECTORY
@@ -385,6 +399,7 @@ local function treeSetConnectorsAndIcons(tree)
       if PackageEventHandle("onFiletreeRDown", tree, event, item_id) == false then
         return
       end
+      event:Skip()
     end)
 
   -- toggle a folder on a single click
@@ -418,7 +433,7 @@ local function treeSetConnectorsAndIcons(tree)
     function (event)
       local itemsrc = event:GetItem()
       parent = tree:GetItemParent(itemsrc)
-      if not (itemsrc:IsOk() and parent:IsOk()) then event:Veto() end
+      if not itemsrc:IsOk() then event:Veto() end
     end)
   tree:Connect(wx.wxEVT_COMMAND_TREE_END_LABEL_EDIT,
     function (event)
@@ -427,9 +442,19 @@ local function treeSetConnectorsAndIcons(tree)
       event:Veto()
 
       local itemsrc = event:GetItem()
-      if not itemsrc:IsOk() or not parent or not parent:IsOk() then return end
+      if not itemsrc:IsOk() then return end
 
       local label = event:GetLabel():gsub("^%s+$","") -- clean all spaces
+
+      -- edited the root element; set the new project directory if needed
+      if tree:IsRoot(itemsrc) then
+        if not event:IsEditCancelled() and wx.wxDirExists(label) then
+          ProjectUpdateProjectDir(label)
+        end
+        return
+      end
+
+      if not parent or not parent:IsOk() then return end
       local sourcedir = tree:GetItemFullName(parent)
       local target = MergeFullPath(sourcedir, label)
       if event:IsEditCancelled() or label == empty
@@ -474,82 +499,22 @@ local function treeSetConnectorsAndIcons(tree)
 end
 
 -- project
--- panel
--- (combobox, button)
--- (treectrl)
-local projpanel = ide.frame.projpanel
-local projcombobox = wx.wxComboBox(projpanel, ID "filetree.proj.drivecb",
-  filetree.projdir,
-  wx.wxDefaultPosition, wx.wxDefaultSize,
-  filetree.projdirlist, wx.wxTE_PROCESS_ENTER)
-
-local projbutton = wx.wxButton(projpanel, ID_PROJECTDIRCHOOSE,
-  "...", wx.wxDefaultPosition, wx.wxSize(26,20))
-
-local projtree = wx.wxTreeCtrl(projpanel, wx.wxID_ANY,
+local projtree = wx.wxTreeCtrl(ide.frame, wx.wxID_ANY,
   wx.wxDefaultPosition, wx.wxDefaultSize,
   wx.wxTR_HAS_BUTTONS + wx.wxTR_SINGLE + wx.wxTR_LINES_AT_ROOT
   + wx.wxTR_EDIT_LABELS)
-
--- use the same font in the combobox as is used in the filetree
 projtree:SetFont(ide.font.fNormal)
-projcombobox:SetFont(ide.font.fNormal)
 
-local projTopSizer = wx.wxBoxSizer( wx.wxHORIZONTAL );
-projTopSizer:Add(projcombobox, 1, wx.wxALL + wx.wxALIGN_LEFT + wx.wxGROW, 0)
-projTopSizer:Add(projbutton, 0, wx.wxALL + wx.wxALIGN_RIGHT + wx.wxADJUST_MINSIZE + wx.wxALIGN_CENTER_VERTICAL, 0)
-
-local projSizer = wx.wxBoxSizer( wx.wxVERTICAL );
-projSizer:Add(projTopSizer, 0, wx.wxALL + wx.wxALIGN_CENTER_HORIZONTAL + wx.wxGROW, 0)
-projSizer:Add(projtree, 1, wx.wxALL + wx.wxALIGN_LEFT + wx.wxGROW, 0)
-
-projpanel:SetSizer(projSizer)
+local projnotebook = ide.frame.projnotebook
+projnotebook:AddPage(projtree, "Project", true)
 
 -- proj connectors
 -- ---------------
-
-local inupdate = false
-local function projcomboboxUpdate(event)
-  if inupdate then return end
-  local cur = projcombobox:GetValue()
-  local fn = wx.wxFileName(filetree.projdirmap[cur] or cur)
-  fn:Normalize()
-
-  -- on Windows, wxwidgets (2.9.5+) generates two COMMAND_COMBOBOX_SELECTED
-  -- events when the selection is done with ENTER, which causes recursive
-  -- call of updateProjectDir. To prevent this the second call is ignored.
-  inupdate = true
-  filetree:updateProjectDir(fn:GetFullPath())
-  inupdate = false
-end
-
-projpanel:Connect(ID "filetree.proj.drivecb", wx.wxEVT_COMMAND_COMBOBOX_SELECTED, projcomboboxUpdate)
-projpanel:Connect(ID "filetree.proj.drivecb", wx.wxEVT_COMMAND_TEXT_ENTER, projcomboboxUpdate)
 
 treeSetConnectorsAndIcons(projtree)
 
 -- proj functions
 -- ---------------
-
-local function abbreviateProjList(projdirlist)
-  filetree.projdirmap = {}
-  local sep = "\t"
-  local dirs = table.concat(projdirlist, sep)..sep
-  local projlist = {}
-  for _, v in ipairs(projdirlist) do
-    -- using FileName because the path doesn't have trailing slash
-    local parts = wx.wxFileName(v..pathsep):GetDirs()
-    local name = table.remove(parts, #parts) or v
-    while #parts > 0
-    and select(2, dirs:gsub("%f[^".. pathsep .."]"..q(name)..sep, "")) > 1 do
-      name = table.remove(parts, #parts) .. pathsep .. name
-    end
-    local abbrev = ("%s (%s)"):format(name, v)
-    filetree.projdirmap[abbrev] = v
-    table.insert(projlist, abbrev)
-  end
-  return projlist
-end
 
 function filetree:updateProjectDir(newdir)
   if (not newdir) or not wx.wxDirExists(newdir) then return end
@@ -578,9 +543,6 @@ function filetree:updateProjectDir(newdir)
     newdir,
     ide.config.projecthistorylength,
     function(s1, s2) return dirname:SameAs(wx.wxFileName.DirName(s2)) end)
-  projcombobox:Clear()
-  projcombobox:Append(abbreviateProjList(filetree.projdirlist))
-  projcombobox:Select(0)
 
   ProjectUpdateProjectDir(newdir,true)
   treeSetRoot(projtree,newdir)
@@ -594,16 +556,15 @@ function filetree:updateProjectDir(newdir)
     end
   end
 
+  -- refresh Recent Projects menu item
+  ide.frame:AddPendingEvent(wx.wxUpdateUIEvent(ID_RECENTPROJECTS))
+
   PackageEventHandle("onProjectLoad", newdir)
 end
 
-projpanel.projbutton = projbutton
-projpanel.projcombobox = projcombobox
-projpanel.projtree = projtree
-
 function FileTreeGetDir()
   return filetree.projdir and #filetree.projdir > 0
-    and wx.wxFileName.DirName(filetree.projdir):GetFullPath()
+    and wx.wxFileName.DirName(filetree.projdir):GetFullPath() or nil
 end
 
 function FileTreeSetProjects(tab)
@@ -615,6 +576,44 @@ end
 
 function FileTreeGetProjects()
   return filetree.projdirlist
+end
+
+local function getProjectLabels()
+  local labels = {}
+  for i, proj in ipairs(FileTreeGetProjects()) do
+    local config = ide.session.projects[proj]
+    local intfname = config and config[2] and config[2].interpreter or ide.interpreter:GetFileName()
+    local interpreter = intfname and ide.interpreters[intfname]
+    table.insert(labels, proj..(interpreter and (' ('..interpreter:GetName()..')') or ''))
+  end
+  return labels
+end
+
+function FileTreeProjectListClear()
+  -- remove all items from the list except the current one
+  filetree.projdirlist = {FileTreeGetDir()}
+end
+
+function FileTreeProjectListUpdate(menu, items)
+  local list = getProjectLabels()
+  for i=#list, 1, -1 do
+    local id = ID("file.recentprojects."..i)
+    local label = list[i]
+    if i <= items then -- this is an existing item; update the label
+      menu:FindItem(id):SetItemLabel(label)
+    else -- need to add an item
+      local item = wx.wxMenuItem(menu, id, label, "")
+      menu:Insert(items, item)
+      ide.frame:Connect(id, wx.wxEVT_COMMAND_MENU_SELECTED, function()
+        ProjectUpdateProjectDir(FileTreeGetProjects()[i]) end)
+    end
+    -- disable the currently selected project
+    if i == 1 then menu:Enable(id, false) end
+  end
+  for i=items, #list+1, -1 do -- delete the rest if the list got shorter
+    menu:Delete(menu:FindItemByPosition(i-1))
+  end
+  return #list
 end
 
 local curr_file

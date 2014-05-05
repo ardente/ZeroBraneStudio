@@ -13,8 +13,7 @@ return {
     if not love2d then
       local sep = win and ';' or ':'
       local default =
-           win and ([[C:\Program Files\love]]..sep..[[D:\Program Files\love]]..sep..
-                    [[C:\Program Files (x86)\love]]..sep..[[D:\Program Files (x86)\love]]..sep)
+           win and (GenerateProgramFilesPath('love', sep)..sep)
         or mac and ('/Applications/love.app/Contents/MacOS'..sep)
         or ''
       local path = default
@@ -46,8 +45,7 @@ return {
     local cmd = ('"%s" "%s"%s%s'):format(love2d, self:fworkdir(wfilename),
       params and " "..params or "", rundebug and ' -debug' or '')
     -- CommandLineRun(cmd,wdir,tooutput,nohide,stringcallback,uid,endcallback)
-    return CommandLineRun(cmd,self:fworkdir(wfilename),true,false,nil,nil,
-      function() ide.debugger.pid = nil end)
+    return CommandLineRun(cmd,self:fworkdir(wfilename),true,true)
   end,
   fprojdir = function(self,wfilename)
     return wfilename:GetPath(wx.wxPATH_GET_VOLUME)

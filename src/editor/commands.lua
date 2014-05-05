@@ -666,6 +666,8 @@ function SetOpenFiles(nametab,params)
 end
 
 local beforeFullScreenPerspective
+local statusbarShown
+
 function ShowFullScreen(setFullScreen)
   if setFullScreen then
     beforeFullScreenPerspective = uimgr:SavePerspective()
@@ -682,21 +684,24 @@ function ShowFullScreen(setFullScreen)
     beforeFullScreenPerspective = nil
   end
 
-  -- On OSX, toolbar and status bar are not hidden when switched to
+  -- On OSX, status bar is not hidden when switched to
   -- full screen: http://trac.wxwidgets.org/ticket/14259; do manually.
   -- need to turn off before showing full screen and turn on after,
   -- otherwise the window is restored incorrectly and is reduced in size.
   if ide.osname == 'Macintosh' and setFullScreen then
+    statusbarShown = frame:GetStatusBar():IsShown()
     frame:GetStatusBar():Hide()
-    frame:GetToolBar():Hide()
   end
 
   -- protect from systems that don't have ShowFullScreen (GTK on linux?)
   pcall(function() frame:ShowFullScreen(setFullScreen) end)
 
   if ide.osname == 'Macintosh' and not setFullScreen then
-    frame:GetStatusBar():Show()
-    frame:GetToolBar():Show()
+    if statusbarShown then
+      frame:GetStatusBar():Show()
+      -- refresh AuiManager as the statusbar may be shown below the border
+      uimgr:Update()
+    end
   end
 end
 
@@ -868,6 +873,12 @@ local function closeWindow(event)
 
   PackageEventHandle("onAppClose")
 
+  -- first need to detach all processes IDE has launched as the current
+  -- process is likely to terminate before child processes are terminated,
+  -- which may lead to a crash when EVT_END_PROCESS event is called.
+  DetachChildProcess()
+  DebuggerShutdown()
+
   SettingsSaveAll()
   ide.settings:Flush()
 
@@ -881,12 +892,6 @@ local function closeWindow(event)
   frame.uimgr:Update() -- hide floating panes
   frame.uimgr:UnInit()
   frame:Hide() -- hide the main frame while the IDE exits
-
-  -- first need to detach all processes IDE has launched as the current
-  -- process is likely to terminate before child processes are terminated,
-  -- which may lead to a crash when EVT_END_PROCESS event is called.
-  DetachChildProcess()
-  DebuggerShutdown()
 
   if ide.session.timer then ide.session.timer:Stop() end
 
@@ -920,4 +925,16 @@ if ide.config.autorecoverinactivity then
   ide.session.timer = wx.wxTimer(frame)
   -- check at least 5s to be never more than 5s off
   ide.session.timer:Start(math.min(5, ide.config.autorecoverinactivity)*1000)
+end
+
+function PaneFloatToggle(window)
+  local pane = uimgr:GetPane(window)
+  if pane:IsFloating() then
+    pane:Dock()
+  else
+    pane:Float()
+    pane:FloatingPosition(pane.window:GetScreenPosition())
+    pane:FloatingSize(pane.window:GetSize())
+  end
+  uimgr:Update()
 end

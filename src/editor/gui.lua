@@ -71,8 +71,15 @@ local function SCinB(id) -- shortcut in brackets
   return shortcut and #shortcut > 0 and (" ("..shortcut..")") or ""
 end
 
+local function menuDropDownPosition(event)
+  local tb = event:GetEventObject():DynamicCast('wxAuiToolBar')
+  local rect = tb:GetToolRect(event:GetId())
+  return ide.frame:ScreenToClient(tb:ClientToScreen(rect:GetBottomLeft()))
+end
+
 local function createToolBar(frame)
-  local toolBar = frame:CreateToolBar(wx.wxTB_FLAT + wx.wxTB_NODIVIDER, wx.wxID_ANY)
+  local toolBar = wxaui.wxAuiToolBar(frame, wx.wxID_ANY, wx.wxDefaultPosition, wx.wxDefaultSize,
+    wxaui.wxAUI_TB_PLAIN_BACKGROUND)
   -- wxChoice is a bit too narrow on Linux, so make it a bit larger
   local funclist = wx.wxChoice.new(toolBar, ID "toolBar.funclist",
     wx.wxDefaultPosition, wx.wxSize.new(240, ide.osname == 'Unix' and 28 or 24))
@@ -85,7 +92,8 @@ local function createToolBar(frame)
   toolBar:AddTool(ID_OPEN, "Open", getBitmap(wx.wxART_FILE_OPEN, wx.wxART_TOOLBAR, toolBmpSize), TR("Open an existing document")..SCinB(ID_OPEN))
   toolBar:AddTool(ID_SAVE, "Save", getBitmap(wx.wxART_FILE_SAVE, wx.wxART_TOOLBAR, toolBmpSize), TR("Save the current document")..SCinB(ID_SAVE))
   toolBar:AddTool(ID_SAVEALL, "Save All", getBitmap(wx.wxART_NEW_DIR, wx.wxART_TOOLBAR, toolBmpSize), TR("Save all open documents")..SCinB(ID_SAVEALL))
-  toolBar:AddTool(ID_PROJECTDIRFROMFILE, "Update", getBitmap(wx.wxART_GO_DIR_UP , wx.wxART_TOOLBAR, toolBmpSize), TR("Set project directory from current file")..SCinB(ID_PROJECTDIRFROMFILE))
+  toolBar:AddTool(ID_PROJECTDIRFROMFILE, "Update", getBitmap(wx.wxART_GO_DIR_UP, wx.wxART_TOOLBAR, toolBmpSize), TR("Set project directory from current file")..SCinB(ID_PROJECTDIRFROMFILE))
+  toolBar:AddTool(ID_PROJECTDIRCHOOSE, "Choose", getBitmap("wxART_DIR_SETUP", wx.wxART_TOOLBAR, toolBmpSize), TR("Choose a project directory")..SCinB(ID_PROJECTDIRCHOOSE))
   toolBar:AddSeparator()
   toolBar:AddTool(ID_FIND, "Find", getBitmap(wx.wxART_FIND, wx.wxART_TOOLBAR, toolBmpSize), TR("Find text")..SCinB(ID_FIND))
   toolBar:AddTool(ID_REPLACE, "Replace", getBitmap(wx.wxART_FIND_AND_REPLACE, wx.wxART_TOOLBAR, toolBmpSize), TR("Find and replace text")..SCinB(ID_REPLACE))
@@ -104,8 +112,32 @@ local function createToolBar(frame)
   end
   toolBar:AddSeparator()
   toolBar:AddControl(funclist)
+
+  toolBar:SetToolDropDown(ID_OPEN, true)
+  toolBar:Connect(ID_OPEN, wxaui.wxEVT_COMMAND_AUITOOLBAR_TOOL_DROPDOWN, function(event)
+    if event:IsDropDownClicked() then
+      local menu = wx.wxMenu()
+      FileRecentListUpdate(menu)
+      toolBar:PopupMenu(menu, menuDropDownPosition(event))
+    else
+      event:Skip()
+    end
+  end)
+
+  toolBar:SetToolDropDown(ID_PROJECTDIRCHOOSE, true)
+  toolBar:Connect(ID_PROJECTDIRCHOOSE, wxaui.wxEVT_COMMAND_AUITOOLBAR_TOOL_DROPDOWN, function(event)
+    if event:IsDropDownClicked() then
+      local menu = wx.wxMenu()
+      FileTreeProjectListUpdate(menu, 0)
+      toolBar:PopupMenu(menu, menuDropDownPosition(event))
+    else
+      event:Skip()
+    end
+  end)
+
+  toolBar:GetArtProvider():SetElementSize(wxaui.wxAUI_TBART_GRIPPER_SIZE, 0)
   toolBar:Realize()
-  
+
   toolBar.funclist = funclist
   frame.toolBar = toolBar
   return toolBar
@@ -152,6 +184,24 @@ local function createNotebook(frame)
     function (event)
       ClosePage(event:GetSelection())
       event:Veto() -- don't propagate the event as the page is already closed
+    end)
+
+  notebook:Connect(wxaui.wxEVT_COMMAND_AUINOTEBOOK_BG_DCLICK,
+    function (event)
+      -- as this event can be on different tab controls,
+      -- need to find the control to add the page to
+      local tabctrl = event:GetEventObject():DynamicCast("wxAuiTabCtrl")
+      -- check if the active page is in the current control
+      local active = tabctrl:GetActivePage()
+      if active >= 0 and tabctrl:GetPage(active).window
+        ~= notebook:GetPage(notebook:GetSelection()) then
+        -- if not, need to activate the control that was clicked on;
+        -- find the last window and switch to it (assuming there is always one)
+        assert(tabctrl:GetPageCount() >= 1, "Expected at least one page in a notebook tab control.")
+        local lastwin = tabctrl:GetPage(tabctrl:GetPageCount()-1).window
+        notebook:SetSelection(notebook:GetPageIndex(lastwin))
+      end
+      NewFile()
     end)
 
   -- tabs can be dragged around which may change their indexes;
@@ -341,6 +391,10 @@ local function createBottomNotebook(frame)
       mgr:Update()
     end)
 
+  -- disallow tabs closing
+  bottomnotebook:Connect(wxaui.wxEVT_COMMAND_AUINOTEBOOK_PAGE_CLOSE,
+    function (event) event:Veto() end)
+
   local errorlog = wxstc.wxStyledTextCtrl(bottomnotebook, wx.wxID_ANY,
     wx.wxDefaultPosition, wx.wxDefaultSize, wx.wxBORDER_NONE)
 
@@ -350,17 +404,25 @@ local function createBottomNotebook(frame)
   bottomnotebook:AddPage(errorlog, TR("Output"), true)
   bottomnotebook:AddPage(shellbox, TR("Local console"), false)
   
-  frame.bottomnotebook = bottomnotebook
   bottomnotebook.errorlog = errorlog
   bottomnotebook.shellbox = shellbox
   
+  frame.bottomnotebook = bottomnotebook
   return bottomnotebook
 end
 
-local function createProjpanel(frame)
-  local projpanel = wx.wxPanel(frame,wx.wxID_ANY)
-  frame.projpanel = projpanel
-  return projpanel
+local function createProjNotebook(frame)
+  local projnotebook = wxaui.wxAuiNotebook(frame, wx.wxID_ANY,
+    wx.wxDefaultPosition, wx.wxDefaultSize,
+    wxaui.wxAUI_NB_DEFAULT_STYLE
+    - wxaui.wxAUI_NB_CLOSE_ON_ACTIVE_TAB + wx.wxNO_BORDER)
+
+  -- disallow tabs closing
+  projnotebook:Connect(wxaui.wxEVT_COMMAND_AUINOTEBOOK_PAGE_CLOSE,
+    function (event) event:Veto() end)
+
+  frame.projnotebook = projnotebook
+  return projnotebook
 end
 
 -- ----------------------------------------------------------------------------
@@ -370,26 +432,41 @@ local frame = createFrame()
 ide.frame = frame
 createToolBar(frame)
 createNotebook(frame)
-createProjpanel(frame)
+createProjNotebook(frame)
 createBottomNotebook(frame)
 
 do
   local frame = ide.frame
   local mgr = frame.uimgr
 
+  mgr:AddPane(frame.toolBar, wxaui.wxAuiPaneInfo():
+              Name("toolbar"):Caption("Toolbar"):
+              MinSize(300,16):FloatingSize(800,48):
+              ToolbarPane():Top():CloseButton(false):PaneBorder(false):
+              LeftDockable(false):RightDockable(false))
   mgr:AddPane(frame.notebook, wxaui.wxAuiPaneInfo():
               Name("notebook"):
               CenterPane():PaneBorder(false))
-  mgr:AddPane(frame.projpanel, wxaui.wxAuiPaneInfo():
-              Name("projpanel"):Caption(TR("Project")):
+  mgr:AddPane(frame.projnotebook, wxaui.wxAuiPaneInfo():
+              Name("projpanel"):CaptionVisible(false):Caption(TR("Project")):
               MinSize(200,200):FloatingSize(200,400):
-              Left():Layer(1):Position(1):
+              Left():Layer(1):Position(1):PaneBorder(false):
               CloseButton(true):MaximizeButton(false):PinButton(true))
   mgr:AddPane(frame.bottomnotebook, wxaui.wxAuiPaneInfo():
-              Name("bottomnotebook"):
+              Name("bottomnotebook"):CaptionVisible(false):
               MinSize(100,100):BestSize(200,200):FloatingSize(400,200):
-              Bottom():Layer(1):Position(1):
+              Bottom():Layer(1):Position(1):PaneBorder(false):
               CloseButton(true):MaximizeButton(false):PinButton(true))
+
+  for _, uimgr in pairs {mgr, frame.notebook:GetAuiManager(),
+    frame.bottomnotebook:GetAuiManager(), frame.projnotebook:GetAuiManager()} do
+    uimgr:GetArtProvider():SetMetric(wxaui.wxAUI_DOCKART_SASH_SIZE, 2)
+  end
+
+  for _, nb in pairs {frame.bottomnotebook, frame.projnotebook} do
+    nb:Connect(wxaui.wxEVT_COMMAND_AUINOTEBOOK_BG_DCLICK,
+      function() PaneFloatToggle(nb) end)
+  end
 
   mgr.defaultPerspective = mgr:SavePerspective()
 end

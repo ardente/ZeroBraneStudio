@@ -46,7 +46,9 @@ end
 function PackageUnRegister(file, ...)
   PackageEventHandleOne(file, "onUnRegister", ...)
   -- remove from the list of installed packages
+  local package = ide.packages[file]
   ide.packages[file] = nil
+  return package
 end
 
 function PackageRegister(file, ...)
@@ -112,11 +114,12 @@ function ide:FindDocumentsByPartialPath(path)
   return docs
 end
 function ide:GetInterpreter() return self.interpreter end
-function ide:GetInterpreters() return ide.interpreters end
+function ide:GetInterpreters() return self.interpreters end
 function ide:GetConfig() return self.config end
 function ide:GetOutput() return self.frame.bottomnotebook.errorlog end
 function ide:GetEditorNotebook() return self.frame.notebook end
 function ide:GetProject() return FileTreeGetDir() end
+function ide:GetLaunchedProcess() return self.debugger and self.debugger.pid end
 
 function ide:GetSetting(path, setting)
   local settings = self.settings

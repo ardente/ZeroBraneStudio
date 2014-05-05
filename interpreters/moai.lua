@@ -11,10 +11,7 @@ return {
     moai = moai or ide.config.path.moai -- check if the path is configured
     if not moai then
       local sep = win and ';' or ':'
-      local default =
-           win and ([[C:\Program Files\moai]]..sep..[[D:\Program Files\moai]]..sep..
-                    [[C:\Program Files (x86)\moai]]..sep..[[D:\Program Files (x86)\moai]]..sep)
-        or ''
+      local default = win and GenerateProgramFilesPath('moai', sep)..sep or ''
       local path = default
                  ..(os.getenv('PATH') or '')..sep
                  ..(os.getenv('MOAI_BIN') or '')..sep
@@ -87,7 +84,7 @@ return {
       or ('"%s" "%s"'):format(moai, file)
     -- CommandLineRun(cmd,wdir,tooutput,nohide,stringcallback,uid,endcallback)
     return CommandLineRun(cmd,self:fworkdir(wfilename),true,false,nil,nil,
-      function() ide.debugger.pid = nil if rundebug then wx.wxRemoveFile(file) end end)
+      function() if rundebug then wx.wxRemoveFile(file) end end)
   end,
   fprojdir = function(self,wfilename)
     return wfilename:GetPath(wx.wxPATH_GET_VOLUME)

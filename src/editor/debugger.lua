@@ -9,14 +9,15 @@ local mobdebug = require "mobdebug"
 local unpack = table.unpack or unpack
 
 local ide = ide
-local debugger = ide.debugger
+local debugger = setmetatable(ide.debugger, ide.proto.Debugger)
 debugger.server = nil -- DebuggerServer object when debugging, else nil
 debugger.running = false -- true when the debuggee is running
 debugger.listening = false -- true when the debugger is listening for a client
 debugger.portnumber = ide.config.debugger.port or mobdebug.port -- the port # to use for debugging
 debugger.watchCtrl = nil -- the watch ctrl that shows watch information
 debugger.stackCtrl = nil -- the stack ctrl that shows stack information
-debugger.toggleview = { stackpanel = false, watchpanel = false }
+debugger.toggleview = {
+  stackpanel = false, watchpanel = false, toolbar = true }
 debugger.hostname = ide.config.debugger.hostname or (function()
   local hostname = socket.dns.gethostname()
   return hostname and socket.dns.toip(hostname) and hostname or "localhost"
@@ -209,10 +210,12 @@ local function debuggerToggleViews(show)
   local mgr = ide.frame.uimgr
   local refresh = false
   for view, needed in pairs(debugger.toggleview) do
+    local bar = view == 'toolbar'
     local pane = mgr:GetPane(view)
     if show then -- starting debugging and pane is not shown
       debugger.toggleview[view] = not pane:IsShown()
-      if debugger.toggleview[view] and needed then
+      if debugger.toggleview[view] and (needed or bar)
+      and (not bar or not ide.frame:IsFullScreen()) then
         pane:Show()
         refresh = true
       end
@@ -499,7 +502,7 @@ debugger.listen = function(start)
       debugger.editormap = {}
 
       local wxfilepath = GetEditorFileAndCurInfo()
-      local startfile = options.startfile or options.startwith
+      local startfile = options.startwith
         or (wxfilepath and wxfilepath:GetFullPath())
 
       if not startfile then
@@ -903,10 +906,12 @@ function debuggerAddWindow(ctrl, panel, name)
     wxaui.wxAUI_NB_DEFAULT_STYLE + wxaui.wxAUI_NB_TAB_EXTERNAL_MOVE
     - wxaui.wxAUI_NB_CLOSE_ON_ACTIVE_TAB + wx.wxNO_BORDER)
   notebook:AddPage(ctrl, name, true)
+  notebook:Connect(wxaui.wxEVT_COMMAND_AUINOTEBOOK_BG_DCLICK,
+    function() PaneFloatToggle(notebook) end)
 
   local mgr = ide.frame.uimgr
   mgr:AddPane(notebook, wxaui.wxAuiPaneInfo():
-              Name(panel):Float():
+              Name(panel):Float():CaptionVisible(false):PaneBorder(false):
               MinSize(width/2,height/2):
               BestSize(width,height):FloatingSize(width,height):
               PinButton(true):Hide())
@@ -1125,7 +1130,6 @@ end
 function DebuggerStop()
   if (debugger.server) then
     debugger.server = nil
-    debugger.pid = nil
     SetAllEditorsReadOnly(false)
     ShellSupportRemote(nil)
     ClearAllCurrentLineMarkers()
@@ -1139,6 +1143,8 @@ function DebuggerStop()
     -- no debugger.server, but scratchpad may still be on. Turn it off.
     DebuggerScratchpadOff()
   end
+  -- debugger can be stopped after "normal" run; need to reset debugger.pid
+  debugger.pid = nil
 end
 
 function DebuggerMakeFileName(editor, filePath)

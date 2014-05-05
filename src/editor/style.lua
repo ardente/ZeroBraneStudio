@@ -24,37 +24,37 @@ local unpack = table.unpack or unpack
 function StylesGetDefault()
   return {
     -- lexer specific (inherit fg/bg from text)
-    lexerdef = {fg = {128, 128, 128}},
-    comment = {fg = {32, 127, 32}, bg = {250, 250, 240}, fill= true},
-    stringtxt = {fg = {127, 0, 127}},
-    stringeol = {fg = {0, 0, 0}, bg = {224, 192, 224}, fill = true},
-    preprocessor = {fg = {127, 127, 0}},
-    operator = {fg = {0, 0, 0}},
-    number = {fg = {90, 0, 255}},
+    lexerdef = {fg = {160, 160, 160}},
+    comment = {fg = {128, 128, 128}},
+    stringtxt = {fg = {128, 32, 16}},
+    stringeol = {fg = {128, 32, 16}, bg = {224, 192, 224}, fill = true},
+    preprocessor = {fg = {128, 128, 0}},
+    operator = {fg = {64, 64, 64}},
+    number = {fg = {80, 112, 255}},
 
-    keywords0 = {fg = {0, 0, 127}, b = true},
-    keywords1 = {fg = {127, 0, 0}, b = true},
-    keywords2 = {fg = {0, 127, 0}, b = true},
-    keywords3 = {fg = {0, 0, 127}, b = true},
-    keywords4 = {fg = {127, 0, 95}, b = true},
-    keywords5 = {fg = {35, 95, 175}, b = true},
-    keywords6 = {fg = {0, 127, 127}, b = true},
-    keywords7 = {fg = {240, 255, 255}, b = true},
+    keywords0 = {fg = {32, 32, 192}},
+    keywords1 = {fg = {127, 32, 96}},
+    keywords2 = {fg = {32, 127, 96}},
+    keywords3 = {fg = {64, 32, 96}},
+    keywords4 = {fg = {127, 0, 95}},
+    keywords5 = {fg = {35, 95, 175}},
+    keywords6 = {fg = {0, 127, 127}},
+    keywords7 = {fg = {240, 255, 255}},
 
     -- common (inherit fg/bg from text)
-    text = nil, -- let os pick
-    linenumber = {fg = {90, 90, 80}, bg = {240, 240, 240}},
-    bracematch = {fg = {0, 0, 255}, b = true},
-    bracemiss = {fg = {255, 0, 0 }, b = true},
+    text = {fg = {64, 64, 64}, bg = {250, 250, 250}},
+    linenumber = {fg = {128, 128, 128}, bg = {250, 250, 250}},
+    bracematch = {fg = {32, 128, 255}, b = true},
+    bracemiss = {fg = {255, 128, 32}, b = true},
     ctrlchar = nil,
     indent = {fg = {192, 192, 230}, bg = {255, 255, 255}},
     calltip = nil,
 
     -- common special (need custom fg & bg)
-    sel = {bg = {192, 192, 192}},
+    sel = {bg = {208, 208, 208}},
     caret = {fg = {0, 0, 0}},
     caretlinebg = {bg = {240, 240, 230}},
-    fold = {fg = {90, 90, 80}, bg = {250, 250, 250}, sel = {90+96, 90, 80}},
+    fold = {fg = {192, 192, 192}, bg = {250, 250, 250}, sel = {160, 128, 224}},
     whitespace = nil,
     edge = {},
 
@@ -64,7 +64,7 @@ function StylesGetDefault()
 
     -- markup
     ['|'] = {fg = {127, 0, 127}},
-    ['`'] = {fg = {127, 127, 127}},
+    ['`'] = {fg = {64, 128, 64}},
     ['['] = {hs = {32, 32, 127}},
 
     -- markers
@@ -79,7 +79,7 @@ function StylesGetDefault()
 
     -- indicators
     indicator = {
-      fncall = {},
+      fncall = {st = wxstc.wxSTC_INDIC_HIDDEN}, -- hide by default
       varlocal = {},
       varglobal = {},
       varmasking = {},
@@ -89,12 +89,13 @@ function StylesGetDefault()
 end
 
 local markers = {
-  breakpoint = {1, wxstc.wxSTC_MARK_CIRCLE, wx.wxColour(220, 0, 0), wx.wxColour(220, 0, 0)},
-  currentline = {2, wxstc.wxSTC_MARK_ARROW, wx.wxBLACK, wx.wxColour(0, 220, 0)},
+  breakpoint = {1, wxstc.wxSTC_MARK_CIRCLE, wx.wxColour(220, 64, 64), wx.wxColour(220, 64, 64)},
+  currentline = {2, wxstc.wxSTC_MARK_ARROW, wx.wxBLACK, wx.wxColour(64, 220, 64)},
   message = {3, wxstc.wxSTC_MARK_CHARACTER+(' '):byte(), wx.wxBLACK, wx.wxColour(220, 220, 220)},
   output = {4, wxstc.wxSTC_MARK_BACKGROUND, wx.wxBLACK, wx.wxColour(240, 240, 240)},
   prompt = {5, wxstc.wxSTC_MARK_ARROWS, wx.wxBLACK, wx.wxColour(220, 220, 220)},
   error = {6, wxstc.wxSTC_MARK_BACKGROUND, wx.wxBLACK, wx.wxColour(255, 220, 220)},
+  bookmark = {7, wxstc.wxSTC_MARK_SHORTARROW, wx.wxBLACK, wx.wxColour(96, 160, 220)},
 }
 function StylesGetMarker(marker) return unpack(markers[marker] or {}) end
 function StylesRemoveMarker(marker) markers[marker] = nil end
@@ -308,6 +309,11 @@ function StylesApplyToEditor(styles,editor,font,fontitalic,lexerconvert)
     applystyle({},defaultmapping["text"])
   end
   editor:StyleClearAll()
+
+  -- set the default linenumber font size based on the editor font size
+  if styles.linenumber then
+    styles.linenumber.fs = styles.linenumber.fs or ide.config.editor.fontsize - 1
+  end
 
   for name,style in pairs(styles) do
     if (specialmapping[name]) then

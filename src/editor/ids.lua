@@ -30,8 +30,12 @@ ID_SAVE             = linux and NewID() or wx.wxID_SAVE
 ID_SAVEAS           = linux and NewID() or wx.wxID_SAVEAS
 ID_SAVEALL          = NewID()
 ID_RECENTFILES      = NewID()
+ID_RECENTFILESCLEAR = NewID()
 ID_RECENTFILESPREV  = NewID()
 ID_RECENTFILESNEXT  = NewID()
+ID_RECENTPROJECTS   = NewID()
+ID_RECENTPROJECTSCLEAR = NewID()
+ID_RECENTPROJECTSPREV = NewID()
 ID_EXIT             = linux and NewID() or wx.wxID_EXIT
 -- Edit menu
 ID_CUT              = linux and NewID() or wx.wxID_CUT
@@ -46,6 +50,10 @@ ID_AUTOCOMPLETEENABLE = NewID()
 ID_COMMENT          = NewID()
 ID_FOLD             = NewID()
 ID_CLEARDYNAMICWORDS = NewID()
+ID_BOOKMARK         = NewID()
+ID_BOOKMARKTOGGLE   = NewID()
+ID_BOOKMARKNEXT     = NewID()
+ID_BOOKMARKPREV     = NewID()
 -- don't use wx.wxID_PREFERENCES to avoid merging with OSX app menu, because
 -- Apple guidelines describe Preferences as a "normal" item without submenus.
 ID_PREFERENCES      = NewID()
@@ -67,6 +75,8 @@ ID_VIEWFILETREE     = NewID()
 ID_VIEWOUTPUT       = NewID()
 ID_VIEWCALLSTACK    = NewID()
 ID_VIEWWATCHWINDOW  = NewID()
+ID_VIEWTOOLBAR      = NewID()
+ID_VIEWSTATUSBAR    = NewID()
 ID_VIEWDEFAULTLAYOUT = NewID()
 ID_VIEWFULLSCREEN   = NewID()
 ID_VIEWMINIMIZE     = NewID()

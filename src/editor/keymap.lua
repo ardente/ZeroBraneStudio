@@ -32,9 +32,10 @@ ide.config.keymap = {
   [ID_SAVEAS]           = "Alt-Shift-S",
   [ID_SAVEALL]          = "",
   [ID_RECENTFILES]      = "",
-  [ID_RECENTFILESPREV]  = "Ctrl-<",
-  [ID_RECENTFILESNEXT]  = "Ctrl->",
+  [ID_RECENTFILESPREV]  = "Ctrl-,",
+  [ID_RECENTFILESNEXT]  = "Ctrl-.",
   [ID_EXIT]             = "Ctrl-Q",
+  [ID_RECENTPROJECTSPREV] = "Ctrl-Shift-<",
 -- Edit menu
   [ID_CUT]              = "Ctrl-X",
   [ID_COPY]             = "Ctrl-C",
@@ -48,6 +49,9 @@ ide.config.keymap = {
   [ID_COMMENT]          = "Ctrl-U",
   [ID_FOLD]             = "F12",
   [ID_CLEARDYNAMICWORDS] = "",
+  [ID_BOOKMARKTOGGLE]   = "Ctrl-F2",
+  [ID_BOOKMARKNEXT]     = "F2",
+  [ID_BOOKMARKPREV]     = "Shift-F2",
 -- Search menu
   [ID_FIND]             = "Ctrl-F",
   [ID_FINDNEXT]         = "F3",

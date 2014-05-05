@@ -152,6 +152,7 @@ end
 if not wx.wxMOD_SHIFT then wx.wxMOD_SHIFT = 0x04 end
 -- wxDIR_NO_FOLLOW is missing in wxlua 2.8.12 as well
 if not wx.wxDIR_NO_FOLLOW then wx.wxDIR_NO_FOLLOW = 0x10 end
+if not wxaui.wxAUI_TB_PLAIN_BACKGROUND then wxaui.wxAUI_TB_PLAIN_BACKGROUND = 2^8 end
 
 if not setfenv then -- Lua 5.2
   -- based on http://lua-users.org/lists/lua-l/2010-06/msg00314.html
@@ -288,7 +289,9 @@ local function loadPackages(filter)
   loadToTab(filter, "packages", ide.packages, false, ide.proto.Plugin)
   if ide.oshome then
     local userpackages = MergeFullPath(ide.oshome, ".zbstudio/packages")
-    loadToTab(filter, userpackages, ide.packages, false, ide.proto.Plugin)
+    if wx.wxDirExists(userpackages) then
+      loadToTab(filter, userpackages, ide.packages, false, ide.proto.Plugin)
+    end
   end
 
   -- check dependencies and assign file names to each package
@@ -477,15 +480,21 @@ end
 -- app-specific menus (Help/About), which are not recognized by MacOS
 -- as special items unless SetMenuBar is done after menus are populated.
 ide.frame:SetMenuBar(ide.frame.menuBar)
-if ide.wxver < "2.9.5" and ide.osname == 'Macintosh' then -- force refresh to fix the filetree
-  pcall(function() ide.frame:ShowFullScreen(true) ide.frame:ShowFullScreen(false) end)
-end
 
 resumePrint()
 
 PackageEventHandle("onAppLoad")
 
+-- The status bar content is drawn incorrectly if it is shown
+-- after being initially hidden.
+-- Show the statusbar and hide it after showing the frame, which fixes the issue.
+local statusbarfix = ide.osname == 'Windows' and not ide.frame:GetStatusBar():IsShown()
+if statusbarfix then ide.frame:GetStatusBar():Show(true) end
+
 ide.frame:Show(true)
+
+if statusbarfix then ide.frame:GetStatusBar():Show(false) end
+
 wx.wxGetApp():MainLoop()
 
 -- There are several reasons for this call:
