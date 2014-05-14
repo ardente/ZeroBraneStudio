@@ -1,4 +1,4 @@
--- Copyright 2011-13 Paul Kulchenko, ZeroBrane LLC
+-- Copyright 2011-14 Paul Kulchenko, ZeroBrane LLC
 -- authors: Luxinia Dev (Eike Decker & Christoph Kubisch)
 ---------------------------------------------------------
 ----------
@@ -342,7 +342,7 @@ function StylesApplyToEditor(styles,editor,font,fontitalic,lexerconvert)
   if styles.calltip then editor:CallTipUseStyle(2) end
 
   do
-    local defaultfg = styles.text and styles.text.fg or {127,127,127}
+    local defaultfg = {127,127,127}
     local indic = styles.indicator or {}
 
     -- use styles.fncall if not empty and if indic.fncall is empty

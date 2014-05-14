@@ -1,5 +1,7 @@
+-- Copyright 2011-14 Paul Kulchenko, ZeroBrane LLC
 -- authors: Luxinia Dev (Eike Decker & Christoph Kubisch)
 ---------------------------------------------------------
+
 local ide = ide
 --
 -- filetree, treectrl for drive & project
@@ -162,9 +164,23 @@ local function treeSetConnectorsAndIcons(tree)
     return fullPath:GetFullPath()
   end
 
+  local function refreshAncestors(node)
+    -- when this method is called from END_EDIT, it causes infinite loop
+    -- on OSX (wxwidgets 2.9.5) as Delete in treeAddDir calls END_EDIT again.
+    -- disable handlers while the tree is populated and then enable back.
+    tree:SetEvtHandlerEnabled(false)
+    while node:IsOk() do
+      local dir = tree:GetItemFullName(node)
+      treeAddDir(tree,node,dir)
+      node = tree:GetItemParent(node)
+    end
+    tree:SetEvtHandlerEnabled(true)
+  end
+
   function tree:ActivateItem(item_id)
     local name = tree:GetItemFullName(item_id)
 
+    local event = wx.wxTreeEvent(wx.wxEVT_COMMAND_TREE_ITEM_ACTIVATED, item_id:GetValue())
     if PackageEventHandle("onFiletreeActivate", tree, event, item_id) == false then
       return
     end
@@ -177,19 +193,6 @@ local function treeSetConnectorsAndIcons(tree)
       if wx.wxFileExists(name) then LoadFile(name,nil,true)
       else refreshAncestors(tree:GetItemParent(item_id)) end -- stale content
     end
-  end
-
-  local function refreshAncestors(node)
-    -- when this method is called from END_EDIT, it causes infinite loop
-    -- on OSX (wxwidgets 2.9.5) as Delete in treeAddDir calls END_EDIT again.
-    -- disable handlers while the tree is populated and then enable back.
-    tree:SetEvtHandlerEnabled(false)
-    while node:IsOk() do
-      local dir = tree:GetItemFullName(node)
-      treeAddDir(tree,node,dir)
-      node = tree:GetItemParent(node)
-    end
-    tree:SetEvtHandlerEnabled(true)
   end
 
   local empty = ""
@@ -580,11 +583,16 @@ end
 
 local function getProjectLabels()
   local labels = {}
+  local fmt = ide.config.menuformatrecentprojects or '%f'
   for i, proj in ipairs(FileTreeGetProjects()) do
     local config = ide.session.projects[proj]
     local intfname = config and config[2] and config[2].interpreter or ide.interpreter:GetFileName()
     local interpreter = intfname and ide.interpreters[intfname]
-    table.insert(labels, proj..(interpreter and (' ('..interpreter:GetName()..')') or ''))
+    local parts = wx.wxFileName(proj..pathsep):GetDirs()
+    table.insert(labels, (fmt
+      :gsub('%%f', proj)
+      :gsub('%%i', interpreter and interpreter:GetName() or '?')
+      :gsub('%%s', parts[#parts] or '')))
   end
   return labels
 end

@@ -1,7 +1,8 @@
--- Copyright 2011-13 Paul Kulchenko, ZeroBrane LLC
+-- Copyright 2011-14 Paul Kulchenko, ZeroBrane LLC
 -- authors: Lomtik Software (J. Winwood & John Labenski)
 -- Luxinia Dev (Eike Decker & Christoph Kubisch)
 ---------------------------------------------------------
+
 local editorID = 100 -- window id to create editor pages with, incremented for new editors
 
 local openDocuments = ide.openDocuments
@@ -696,6 +697,9 @@ function CreateEditor()
     if ide.wxver >= "2.9.5" and edcfg.wrapflags then
       editor:SetWrapVisualFlags(tonumber(edcfg.wrapflags) or wxstc.wxSTC_WRAPVISUALFLAG_NONE)
     end
+  else
+    editor:SetScrollWidth(100) -- set default width
+    editor:SetScrollWidthTracking(1) -- enable width auto-adjustment
   end
 
   if edcfg.defaulteol == wxstc.wxSTC_EOL_CRLF

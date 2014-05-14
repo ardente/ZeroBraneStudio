@@ -1,6 +1,8 @@
+-- Copyright 2011-14 Paul Kulchenko, ZeroBrane LLC
 -- authors: Lomtik Software (J. Winwood & John Labenski)
 -- Luxinia Dev (Eike Decker & Christoph Kubisch)
 ---------------------------------------------------------
+
 local ide = ide
 -- ---------------------------------------------------------------------------
 -- Create the Edit menu and attach the callback functions
@@ -259,12 +261,14 @@ end
 local function bookmarkNext()
   local editor = GetEditor()
   local line = editor:MarkerNext(editor:GetCurrentLine()+1, BOOKMARK_MARKER_VALUE)
+  if line == -1 then line = editor:MarkerNext(0, BOOKMARK_MARKER_VALUE) end
   if line ~= -1 then editor:GotoLine(line) end
 end
 
 local function bookmarkPrev()
   local editor = GetEditor()
   local line = editor:MarkerPrevious(editor:GetCurrentLine()-1, BOOKMARK_MARKER_VALUE)
+  if line == -1 then line = editor:MarkerPrevious(editor:GetLineCount(), BOOKMARK_MARKER_VALUE) end
   if line ~= -1 then editor:GotoLine(line) end
 end
 
