@@ -51,7 +51,8 @@ function LoadFile(filePath, editor, file_must_exist, skipselection)
       if not skipselection and doc.index ~= notebook:GetSelection() then
         -- selecting the same tab doesn't trigger PAGE_CHANGE event,
         -- but moves the focus to the tab bar, which needs to be avoided.
-        notebook:SetSelection(doc.index) end
+        notebook:SetSelection(doc.index)
+      end
       return doc.editor
     end
   end
@@ -523,13 +524,16 @@ function FoldSome()
 
     if foldall then
       if foldHdr and editor:GetFoldExpanded(ln) then
-        editor:ToggleFold(ln) end
+        editor:ToggleFold(ln)
+      end
     elseif hidebase then
       if not foldHdr and (foldLvl == wxstc.wxSTC_FOLDLEVELBASE) then
-        editor:HideLines(ln, ln) end
+        editor:HideLines(ln, ln)
+      end
     else -- unfold all
       if foldHdr and not editor:GetFoldExpanded(ln) then
-        editor:ToggleFold(ln) end
+        editor:ToggleFold(ln)
+      end
     end
   end
   editor:EnsureCaretVisible()
@@ -604,7 +608,8 @@ function CompileProgram(editor, params)
       end
     end
     if line and params.jumponerror and line-1 ~= editor:GetCurrentLine() then
-      editor:GotoLine(line-1) end
+      editor:GotoLine(line-1)
+    end
   end
 
   return func ~= nil -- return true if it compiled ok
@@ -903,18 +908,67 @@ frame:Connect(wx.wxEVT_CLOSE_WINDOW, closeWindow)
 
 frame:Connect(wx.wxEVT_TIMER, saveAutoRecovery)
 
+-- in the presence of wxAuiToolbar, when (1) the app gets focus,
+-- (2) a floating panel is closed or (3) a toolbar dropdown is closed,
+-- the focus is always on the toolbar when the app gets focus,
+-- so to restore the focus correctly, need to track where the control is
+-- and to set the focus to the last element that had focus.
+-- it would be easier to track KILL_FOCUS events, but controls on OSX
+-- don't always generate KILL_FOCUS events (see relevant wxwidgets
+-- tickets: http://trac.wxwidgets.org/ticket/14142
+-- and http://trac.wxwidgets.org/ticket/14269)
+
+local infocus
+ide.editorApp:Connect(wx.wxEVT_SET_FOCUS, function(event)
+  if ide.exitingProgram then return end
+
+  local win = ide.frame:FindFocus()
+  if win then
+    local class = win:GetClassInfo():GetClassName()
+    -- don't set focus on the main frame or toolbar
+    if infocus and (class == 'wxAuiToolBar' or class == 'wxFrame') then
+      pcall(function() infocus:SetFocus() end)
+      return
+    end
+
+    -- keep track of the current control in focus, but only on the main frame
+    -- don't try to "remember" any of the focus changes on various dialog
+    -- windows as those will disappear along with their controls
+    local grandparent = win:GetGrandParent()
+    local frameid = ide.frame:GetId()
+    local mainwin = grandparent and grandparent:GetId() == frameid
+    local parent = win:GetParent()
+    while parent do
+      local class = parent:GetClassInfo():GetClassName()
+      if (class == 'wxFrame' or class:find('^wx.*Dialog$'))
+      and parent:GetId() ~= frameid then
+        mainwin = false; break
+      end
+      parent = parent:GetParent()
+    end
+    if mainwin then
+      if infocus and infocus ~= win and ide.osname == 'Macintosh' then
+        -- kill focus on the control that had the focus as wxwidgets on OSX
+        -- doesn't do it: http://trac.wxwidgets.org/ticket/14142;
+        -- wrap into pcall in case the window is already deleted
+        local ev = wx.wxFocusEvent(wx.wxEVT_KILL_FOCUS)
+        pcall(function() infocus:GetEventHandler():ProcessEvent(ev) end)
+      end
+      infocus = win
+    end
+  end
+
+  event:Skip()
+end)
+
 ide.editorApp:Connect(wx.wxEVT_ACTIVATE_APP,
   function(event)
     if not ide.exitingProgram then
-      -- wxSTC controls on OSX don't generate KILL_FOCUS events
-      -- when focus is switched between controls in the app;
-      -- manually kill focus when the app is deactivated
-      if ide.osname == 'Macintosh' and not event:GetActive() then
-        local ntbk = frame.bottomnotebook
-        for _,win in ipairs({ntbk.errorlog, ntbk.shellbox, GetEditor()}) do
-          local ev = wx.wxFocusEvent(wx.wxEVT_KILL_FOCUS)
-          win:GetEventHandler():ProcessEvent(ev)
-        end
+      if ide.osname == 'Macintosh' and infocus and event:GetActive() then
+        -- restore focus to the last element that received it;
+        -- wrap into pcall in case the element has disappeared
+        -- while the application was out of focus
+        pcall(function() infocus:SetFocus() end)
       end
 
       local event = event:GetActive() and "onAppFocusSet" or "onAppFocusLost"

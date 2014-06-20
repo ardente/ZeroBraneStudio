@@ -26,40 +26,61 @@ local function isfndef(str)
   return s,e,cap,l
 end
 
+local q = EscapeMagic
+
 return {
   exts = {"lua", "rockspec", "wlua"},
   lexer = wxstc.wxSTC_LEX_LUA,
   apitype = "lua",
   linecomment = "--",
-  sep = "%.:",
+  sep = ".:",
   isfncall = function(str)
     return string.find(str, funccall .. "[%({'\"]")
   end,
   isfndef = isfndef,
   isdecindent = function(str)
+    str = str:gsub('%-%-%[=*%[.*%]=*%]',''):gsub('%-%-.*','')
     -- this handles three different cases:
-    local term = str:match("^%s*(%w+)%s*$") or str:match("^%s*(elseif)%s")
+    local term = (str:match("^%s*(%w+)%s*$")
+      or str:match("^%s*(elseif)[%s%(]")
+      or str:match("^%s*(else)%f[%W]")
+    )
     -- (1) 'end', 'elseif', 'else'
     local match = term and decindent[term]
-    -- (2) 'end)' and 'end}'
-    if not term then term, match = str:match("^%s*(end)%s*([%)%}]+)%s*[,;]?") end
+    -- (2) 'end)', 'end}', 'end,', and 'end;'
+    if not term then term, match = str:match("^%s*(end)%s*([%)%}]*)%s*[,;]?") end
     -- (3) '},', '};', '),' and ');'
     if not term then match = str:match("^%s*[%)%}]+%s*[,;]?%s*$") end
 
     return match and 1 or 0, match and term and 1 or 0
   end,
   isincindent = function(str)
+    str = (str:gsub('%-%-%[=*%[.*%]=*%]',''):gsub('%-%-.*','')
+      :gsub("'.-\\'","'"):gsub("'.-'","")
+      :gsub('".-\\"','"'):gsub('".-"','')
+      :gsub("%b()","()") -- remove all function calls
+    )
     local term = str:match("^%s*(%w+)%W*")
-    term = term and incindent[term] and 1 or 0
-    str = str:gsub("'.-'",""):gsub('".-"','')
+    local terminc = term and incindent[term] and 1 or 0
+    -- fix 'if' not terminated with 'then'
+    -- or 'then' not started with 'if'
+    if (term == 'if' or term == 'elseif') and not str:match("%f[%w]then%f[%W]")
+    or (term == 'for') and not str:match("%S%s+do%f[%W]")
+    or (term == 'while') and not str:match("%f[%w]do%f[%W]") then
+      terminc = 0
+    elseif not (term == 'if' or term == 'elseif') and str:match("%f[%w]then%f[%W]")
+    or not (term == 'for') and str:match("%S%s+do%f[%W]")
+    or not (term == 'while') and str:match("%f[%w]do%f[%W]") then
+      terminc = 1
+    end
     local _, opened = str:gsub("([%{%(])", "%1")
     local _, closed = str:gsub("([%}%)])", "%1")
     local func = (isfndef(str) or str:match("%W+function%s*%(")) and 1 or 0
     -- ended should only be used to negate term and func effects
     local anon = str:match("%W+function%s*%(.+%Wend%W")
-    local ended = (term + func > 0) and (str:match("%W+end%s*$") or anon) and 1 or 0
+    local ended = (terminc + func > 0) and (str:match("%W+end%s*$") or anon) and 1 or 0
 
-    return opened - closed + func + term - ended
+    return opened - closed + func + terminc - ended
   end,
   markvars = function(code, pos, vars)
     local PARSE = require 'lua_parser_loose'
@@ -92,7 +113,7 @@ return {
     local line = editor:GetCurrentLine()-1
     local maxlines = 48 -- scan up to this many lines back
 
-    local scopestart = {"if","do","while","function", "local%s+function", "for", "else", "elseif"}
+    local scopestart = {"if", "do", "while", "function", "local%s+function", "for", "else", "elseif"}
     local scopeend = {"end"}
     local iscomment = editor.spec.iscomment
 
@@ -129,8 +150,9 @@ return {
         local tx = editor:GetLine(line) --= string
 
         -- check for assignments
-        local varname = "([%w_][%w_%.]*)"
-        local identifier = "([%w_][%w_%.:%s]*)"
+        local sep = editor.spec.sep
+        local varname = "([%w_][%w_"..q(sep:sub(1,1)).."]*)"
+        local identifier = "([%w_][%w_"..q(sep).."%s]*)"
 
         -- special hint
         local typ,var = tx:match("%s*%-%-=%s*"..varname.."%s+"..identifier)
@@ -169,7 +191,7 @@ return {
           end
 
           if (var and typ) then
-            class,func = typ:match(varname.."[%.:]"..varname)
+            class,func = typ:match(varname.."["..q(sep).."]"..varname)
             if (assigns[typ]) then
               assigns[var] = assigns[typ]
             elseif (func) then

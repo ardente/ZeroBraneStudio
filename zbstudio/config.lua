@@ -35,7 +35,6 @@ end
 
 outputshell.usewrap = true
 filehistorylength = 20
-menuformatrecentprojects = "%f | %i"
 
 hidpi = mac -- support Retina displays by default (OSX)
 

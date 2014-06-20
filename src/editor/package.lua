@@ -73,6 +73,7 @@ function ide:GetPackagePath(packname)
 end
 function ide:GetApp() return self.editorApp end
 function ide:GetEditor(index) return GetEditor(index) end
+function ide:GetEditorWithFocus(ed) return GetEditorWithFocus(ed) end
 function ide:GetMenuBar() return self.frame.menuBar end
 function ide:GetStatusBar() return self.frame.statusBar end
 function ide:GetToolBar() return self.frame.toolBar end
@@ -121,6 +122,9 @@ function ide:GetOutput() return self.frame.bottomnotebook.errorlog end
 function ide:GetEditorNotebook() return self.frame.notebook end
 function ide:GetProject() return FileTreeGetDir() end
 function ide:GetLaunchedProcess() return self.debugger and self.debugger.pid end
+function ide:GetProjectTree() return ide.filetree.projtree end
+function ide:GetWatch() return self.debugger and self.debugger.watchCtrl end
+function ide:GetStack() return self.debugger and self.debugger.watchCtrl end
 
 function ide:GetSetting(path, setting)
   local settings = self.settings

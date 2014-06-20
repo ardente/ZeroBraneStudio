@@ -88,8 +88,8 @@ local function updateBraceMatch(editor)
   if (pos) then
     -- don't match brackets in markup comments
     local style = bit.band(editor:GetStyleAt(pos), 31)
-    if MarkupIsSpecial and MarkupIsSpecial(style)
-      or editor.spec.iscomment[style] then return end
+    if (MarkupIsSpecial and MarkupIsSpecial(style)
+      or editor.spec.iscomment[style]) then return end
 
     local pos2 = editor:BraceMatch(pos)
     if (pos2 == wxstc.wxSTC_INVALID_POSITION) then
@@ -103,15 +103,6 @@ local function updateBraceMatch(editor)
     editor:BraceHighlight(wxstc.wxSTC_INVALID_POSITION,-1)
     editor.matchon = false
   end
-end
-
-local function getFileTitle (editor)
-  if not editor or not openDocuments[editor:GetId()] then return GetIDEString("editor") end
-  local id = editor:GetId()
-  local filePath = openDocuments[id].filePath
-  local fileName = openDocuments[id].fileName
-  if not filePath or not fileName then return GetIDEString("editor") end
-  return GetIDEString("editor").." ["..filePath.."]"
 end
 
 -- Check if file is altered, show dialog to reload it
@@ -182,7 +173,7 @@ function SetEditorSelection(selection)
   local editor = GetEditor(selection)
   updateStatusText(editor) -- update even if nil
   statusBar:SetStatusText("",1)
-  ide.frame:SetTitle(getFileTitle(editor))
+  ide.frame:SetTitle(ExpandPlaceholders(ide.config.format.apptitle))
 
   if editor then
     if funclist:IsEmpty() then funclist:Append(TR("Jump to a function definition..."), 0) end
@@ -262,6 +253,14 @@ function EditorAutoComplete(editor)
 
   -- know now which string is to be completed
   local userList = CreateAutoCompList(editor,lt)
+
+  -- remove any suggestions that match the word the cursor is on
+  -- for example, if typing 'foo' in front of 'bar', 'foobar' is not offered
+  local right = linetx:sub(localpos+1,#linetx):match("^([%a_]+[%w_]*)")
+  if userList and right then
+    userList = userList:gsub("%f[%w_]"..lt..right.."%f[%W]",""):gsub("  +"," ")
+  end
+
   -- don't show the list if it only suggests what's already typed
   if userList and #userList > 0 and not lt:find(userList.."$") then
     editor:UserListShow(1, userList)
@@ -484,7 +483,8 @@ local function indicateFindInstances(editor, name, pos)
       if this and token.fpos > pos and this == token.at+1 then break end
 
       if #instances > 1 and instances[#instances][-1] == token.at+1 then
-        table.remove(instances) end
+        table.remove(instances)
+      end
     elseif token.name == name then
       if op == 'Id' then
         table.insert(instances[#instances], token.fpos)
@@ -643,7 +643,8 @@ function IndicateAll(editor, lines, linee)
 end
 
 if ide.wxver < "2.9.5" or not ide.config.autoanalyzer then
-  IndicateAll = indicateFunctionsOnly end
+  IndicateAll = indicateFunctionsOnly
+end
 
 -- ----------------------------------------------------------------------------
 -- Create an editor
@@ -694,8 +695,16 @@ function CreateEditor()
   if (edcfg.usewrap) then
     editor:SetWrapMode(wxstc.wxSTC_WRAP_WORD)
     editor:SetWrapStartIndent(0)
-    if ide.wxver >= "2.9.5" and edcfg.wrapflags then
-      editor:SetWrapVisualFlags(tonumber(edcfg.wrapflags) or wxstc.wxSTC_WRAPVISUALFLAG_NONE)
+    if ide.wxver >= "2.9.5" then
+      if edcfg.wrapflags then
+        editor:SetWrapVisualFlags(tonumber(edcfg.wrapflags) or wxstc.wxSTC_WRAPVISUALFLAG_NONE)
+      end
+      if edcfg.wrapstartindent then
+        editor:SetWrapStartIndent(tonumber(edcfg.wrapstartindent) or 0)
+      end
+      if edcfg.wrapindentmode then
+        editor:SetWrapIndentMode(edcfg.wrapindentmode)
+      end
     end
   else
     editor:SetScrollWidth(100) -- set default width
@@ -734,14 +743,13 @@ function CreateEditor()
   editor:SetFoldFlags(tonumber(edcfg.foldflags) or wxstc.wxSTC_FOLDFLAG_LINEAFTER_CONTRACTED)
 
   if ide.wxver >= "2.9.5" then
-    editor:SetExtraAscent(tonumber(edcfg.extraascent) or 0)
-  end
-
-  -- allow multiple selection and multi-cursor editing if supported
-  if ide.wxver >= "2.9.5" then
+    -- allow multiple selection and multi-cursor editing if supported
     editor:SetMultipleSelection(1)
     editor:SetAdditionalCaretsBlink(1)
     editor:SetAdditionalSelectionTyping(1)
+    -- allow extra ascent/descent
+    editor:SetExtraAscent(tonumber(edcfg.extraascent) or 0)
+    editor:SetExtraDescent(tonumber(edcfg.extradescent) or 0)
   end
 
   do
@@ -781,12 +789,14 @@ function CreateEditor()
         else
           redolater = nil
           self:GotoPos(pos)
+          self:EnsureVisibleEnforcePolicy(self:LineFromPosition(pos))
         end
       elseif not badtime and redolater then
         -- reset the left margin first to make sure that the position
         -- is set "from the left" to get the best content displayed.
         self:SetXOffset(0)
         self:GotoPos(redolater)
+        self:EnsureVisibleEnforcePolicy(self:LineFromPosition(redolater))
         redolater = nil
       end
     end
@@ -841,7 +851,6 @@ function CreateEditor()
 
   editor:Connect(wxstc.wxEVT_STC_CHARADDED,
     function (event)
-      -- auto-indent
       local LF = string.byte("\n")
       local ch = event:GetKey()
       local pos = editor:GetCurrentPos()
@@ -854,6 +863,7 @@ function CreateEditor()
       if PackageEventHandle("onEditorCharAdded", editor, event) == false then
         -- this event has already been handled
       elseif (ch == LF) then
+        -- auto-indent
         if (line > 0) then
           local indent = editor:GetLineIndentation(line - 1)
           local linedone = editor:GetLine(line - 1)
@@ -949,6 +959,10 @@ function CreateEditor()
 
   editor:Connect(wxstc.wxEVT_STC_USERLISTSELECTION,
     function (event)
+      if PackageEventHandle("onEditorUserlistSelection", editor, event) == false then
+        return
+      end
+
       if ide.wxver >= "2.9.5" and editor:GetSelections() > 1 then
         local text = event:GetText()
         -- capture all positions as the selection may change
@@ -1305,6 +1319,7 @@ end
 -- ----------------------------------------------------------------------------
 -- Add an editor to the notebook
 function AddEditor(editor, name)
+  assert(notebook:GetPageIndex(editor) == -1, "Editor being added is not in the notebook: failed")
   if notebook:AddPage(editor, name, true) then
     local id = editor:GetId()
     local document = setmetatable({}, ide.proto.Document)

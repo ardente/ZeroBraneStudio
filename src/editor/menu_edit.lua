@@ -10,7 +10,7 @@ local ide = ide
 local frame = ide.frame
 local menuBar = frame.menuBar
 
-local editMenu = wx.wxMenu{
+local editMenu = wx.wxMenu {
   { ID_CUT, TR("Cu&t")..KSC(ID_CUT), TR("Cut selected text to clipboard") },
   { ID_COPY, TR("&Copy")..KSC(ID_COPY), TR("Copy selected text to clipboard") },
   { ID_PASTE, TR("&Paste")..KSC(ID_PASTE), TR("Paste text from the clipboard") },
@@ -23,68 +23,57 @@ local editMenu = wx.wxMenu{
   { ID_AUTOCOMPLETE, TR("Complete &Identifier")..KSC(ID_AUTOCOMPLETE), TR("Complete the current identifier") },
   { ID_AUTOCOMPLETEENABLE, TR("Auto Complete Identifiers")..KSC(ID_AUTOCOMPLETEENABLE), TR("Auto complete while typing"), wx.wxITEM_CHECK },
   { },
-  { },
-  { ID_COMMENT, TR("C&omment/Uncomment")..KSC(ID_COMMENT), TR("Comment or uncomment current or selected lines") },
+}
+
+editMenu:Append(ID_SOURCE, TR("Source"), wx.wxMenu {
+  { ID_COMMENT, TR("&Comment/Uncomment")..KSC(ID_COMMENT), TR("Comment or uncomment current or selected lines") },
+  { ID_REINDENT, TR("Correct &Indentation")..KSC(ID_REINDENT), TR("Re-indent selected lines") },
   { ID_FOLD, TR("&Fold/Unfold All")..KSC(ID_FOLD), TR("Fold or unfold all code folds") },
   { ID_SORT, TR("&Sort")..KSC(ID_SORT), TR("Sort selected lines") },
-  { },
-}
-
-local bookmarkmenu = wx.wxMenu{
-  {ID_BOOKMARKTOGGLE, TR("Toggle Bookmark")..KSC(ID_BOOKMARKTOGGLE)},
-  {ID_BOOKMARKNEXT, TR("Go To Next Bookmark")..KSC(ID_BOOKMARKNEXT)},
-  {ID_BOOKMARKPREV, TR("Go To Previous Bookmark")..KSC(ID_BOOKMARKPREV)},
-}
-local bookmark = wx.wxMenuItem(editMenu, ID_BOOKMARK,
-  TR("Bookmark")..KSC(ID_BOOKMARK), TR("Bookmark"), wx.wxITEM_NORMAL, bookmarkmenu)
-editMenu:Insert(12, bookmark)
-
-local preferencesMenu = wx.wxMenu{
-  {ID_PREFERENCESSYSTEM, TR("Settings: System")..KSC(ID_PREFERENCESSYSTEM)},
-  {ID_PREFERENCESUSER, TR("Settings: User")..KSC(ID_PREFERENCESUSER)},
-}
-editMenu:Append(ID_PREFERENCES, TR("Preferences"), preferencesMenu)
+})
+editMenu:Append(ID_BOOKMARK, TR("Bookmark"), wx.wxMenu {
+  { ID_BOOKMARKTOGGLE, TR("Toggle Bookmark")..KSC(ID_BOOKMARKTOGGLE) },
+  { ID_BOOKMARKNEXT, TR("Go To Next Bookmark")..KSC(ID_BOOKMARKNEXT) },
+  { ID_BOOKMARKPREV, TR("Go To Previous Bookmark")..KSC(ID_BOOKMARKPREV) },
+})
+editMenu:AppendSeparator()
+editMenu:Append(ID_PREFERENCES, TR("Preferences"), wx.wxMenu {
+  { ID_PREFERENCESSYSTEM, TR("Settings: System")..KSC(ID_PREFERENCESSYSTEM) },
+  { ID_PREFERENCESUSER, TR("Settings: User")..KSC(ID_PREFERENCESUSER) },
+})
 menuBar:Append(editMenu, TR("&Edit"))
 
 editMenu:Check(ID_AUTOCOMPLETEENABLE, ide.config.autocomplete)
+
+local function onUpdateUIEditorInFocus(event)
+  event:Enable(GetEditorWithFocus(GetEditor()) ~= nil)
+end
 
 local function onUpdateUIEditMenu(event)
   local editor = GetEditorWithFocus()
   if editor == nil then event:Enable(false); return end
 
-  local cancomment = pcall(function() return editor.spec end) and editor.spec
-    and editor.spec.linecomment and true or false
-  local alwaysOn = { [ID_SELECTALL] = true, [ID_FOLD] = ide.config.editor.fold,
+  local alwaysOn = {
+    [ID_SELECTALL] = true,
     -- allow Cut and Copy commands as these work on a line if no selection
     [ID_COPY] = true, [ID_CUT] = true,
-    [ID_COMMENT] = cancomment, [ID_AUTOCOMPLETE] = true, [ID_SORT] = true}
+  }
   local menu_id = event:GetId()
   local enable =
     menu_id == ID_PASTE and editor:CanPaste() or
     menu_id == ID_UNDO and editor:CanUndo() or
     menu_id == ID_REDO and editor:CanRedo() or
     alwaysOn[menu_id]
-  -- wxComboBox doesn't have SELECT ALL, so disable it
-  -- editor:GetClassInfo mysteriously fails on Ubuntu 13.10 (earlier versions
-  -- are okay), which indicates that the menu item is checked after editor
-  -- is already closed, so the first pcall() check should protect against that.
-  if pcall(function() editor:GetId() end)
-  and editor:GetClassInfo():GetClassName() == 'wxComboBox'
-  and menu_id == ID_SELECTALL then enable = false end
   event:Enable(enable)
 end
 
-local function onUpdateUIisEditor(event) event:Enable(GetEditor() ~= nil) end
-
 local function onEditMenu(event)
   local editor = GetEditorWithFocus()
+  if editor == nil then event:Skip(); return end
 
-  -- if there is no editor, or if it's not the editor we care about,
-  -- then allow normal processing to take place
-  if editor == nil or
-     (editor:FindFocus() and editor:FindFocus():GetId() ~= editor:GetId()) or
-     editor:GetClassInfo():GetClassName() ~= 'wxStyledTextCtrl'
-    then event:Skip(); return end
+  if PackageEventHandle("onEditorAction", editor, event) == false then
+    return
+  end
 
   local menu_id = event:GetId()
   if menu_id == ID_CUT then
@@ -104,6 +93,27 @@ for _, event in pairs({ID_CUT, ID_COPY, ID_PASTE, ID_SELECTALL, ID_UNDO, ID_REDO
   frame:Connect(event, wx.wxEVT_COMMAND_MENU_SELECTED, onEditMenu)
   frame:Connect(event, wx.wxEVT_UPDATE_UI, onUpdateUIEditMenu)
 end
+
+for _, event in pairs({
+    ID_BOOKMARKTOGGLE, ID_BOOKMARKNEXT, ID_BOOKMARKPREV,
+    ID_AUTOCOMPLETE, ID_SORT, ID_REINDENT, ID_SHOWTOOLTIP,
+}) do
+  frame:Connect(event, wx.wxEVT_UPDATE_UI, onUpdateUIEditorInFocus)
+end
+
+frame:Connect(ID_FOLD, wx.wxEVT_UPDATE_UI,
+  function(event)
+    local editor = GetEditorWithFocus(GetEditor())
+    event:Enable(ide.config.editor.fold and editor ~= nil)
+  end)
+
+frame:Connect(ID_COMMENT, wx.wxEVT_UPDATE_UI,
+  function(event)
+    local editor = GetEditorWithFocus(GetEditor())
+    event:Enable(editor ~= nil
+      and pcall(function() return editor.spec end) and editor.spec
+      and editor.spec.linecomment and true or false)
+  end)
 
 local function generateConfigMessage(type)
   return ([==[--[[--
@@ -145,18 +155,12 @@ frame:Connect(ID_SHOWTOOLTIP, wx.wxEVT_COMMAND_MENU_SELECTED,
 
     EditorCallTip(editor, editor:GetCurrentPos())
   end)
-frame:Connect(ID_SHOWTOOLTIP, wx.wxEVT_UPDATE_UI, onUpdateUIisEditor)
 
 frame:Connect(ID_AUTOCOMPLETE, wx.wxEVT_COMMAND_MENU_SELECTED,
-  function (event)
-    EditorAutoComplete(GetEditor())
-  end)
-frame:Connect(ID_AUTOCOMPLETE, wx.wxEVT_UPDATE_UI, onUpdateUIEditMenu)
+  function (event) EditorAutoComplete(GetEditor()) end)
 
 frame:Connect(ID_AUTOCOMPLETEENABLE, wx.wxEVT_COMMAND_MENU_SELECTED,
-  function (event)
-    ide.config.autocomplete = event:IsChecked()
-  end)
+  function (event) ide.config.autocomplete = event:IsChecked() end)
 
 frame:Connect(ID_COMMENT, wx.wxEVT_COMMAND_MENU_SELECTED,
   function (event)
@@ -218,31 +222,91 @@ frame:Connect(ID_COMMENT, wx.wxEVT_COMMAND_MENU_SELECTED,
         + math.max(0, curpos+#editor:GetLine(curline)-curlen))
     end
   end)
-frame:Connect(ID_COMMENT, wx.wxEVT_UPDATE_UI, onUpdateUIEditMenu)
+
+local function processSelection(editor, func)
+  local text = editor:GetSelectedText()
+  local pos = editor:GetCurrentPos()
+  if #text == 0 then
+    editor:SelectAll()
+    text = editor:GetSelectedText()
+  end
+  local wholeline = text:find('\n$')
+  local buf = {}
+  for line in string.gmatch(text..(wholeline and '' or '\n'), "(.-\r?\n)") do
+    table.insert(buf, line)
+  end
+  if #buf > 0 then
+    if func then func(buf) end
+    -- add new line at the end if it was there
+    local newtext = table.concat(buf, ''):gsub('(\r?\n)$', wholeline and '%1' or '')
+    -- straightforward editor:ReplaceSelection() doesn't work reliably as
+    -- it sometimes doubles the context when the entire file is selected.
+    -- this seems like Scintilla issue, so use ReplaceTarget instead.
+    -- Since this doesn't work with rectangular selection, which
+    -- ReplaceSelection should handle (after wxwidgets 3.x upgrade), this
+    -- will need to be revisited when ReplaceSelection is updated.
+    if newtext ~= text then
+      editor:TargetFromSelection()
+      editor:ReplaceTarget(newtext)
+    end
+  end
+  editor:GotoPos(pos)
+end
 
 frame:Connect(ID_SORT, wx.wxEVT_COMMAND_MENU_SELECTED,
+  function (event) processSelection(GetEditor(), table.sort) end)
+
+local function reIndent(editor, buf)
+  local decindent, incindent = editor.spec.isdecindent, editor.spec.isincindent
+  if not (decindent and incindent) then return end
+
+  local line = editor:LineFromPosition(editor:GetSelectionStart())
+  local indent = 0
+  local text = ''
+  -- find the last non-empty line in the previous block (if any)
+  for n = line-1, 1, -1 do
+    indent = editor:GetLineIndentation(n)
+    text = editor:GetLine(n)
+    if text:match('[^\r\n]') then break end
+  end
+
+  local ut = editor:GetUseTabs()
+  local tw = ut and editor:GetTabWidth() or editor:GetIndent()
+
+  local indents = {}
+  for line = 1, #buf+1 do
+    local closed, blockend = decindent(text)
+    local opened = incindent(text)
+
+    -- ignore impact from initial block endings as they are already indented
+    if line == 1 then blockend = 0 end
+
+    -- this only needs to be done for 2, #buf+1; do it and get out when done
+    if line > 1 then indents[line-1] = indents[line-1] - tw * closed end
+    if line > #buf then break end
+
+    indent = indent + tw * (opened - blockend)
+    if indent < 0 then indent = 0 end
+
+    indents[line] = indent
+    text = buf[line]
+  end
+
+  for line = 1, #buf do
+    buf[line] = buf[line]:gsub("^[ \t]*",
+      not buf[line]:match('%S') and ''
+      or ut and ("\t"):rep(indents[line] / tw) or (" "):rep(indents[line]))
+  end
+end
+
+frame:Connect(ID_REINDENT, wx.wxEVT_COMMAND_MENU_SELECTED,
   function (event)
     local editor = GetEditor()
-    local buf = {}
-    for line in string.gmatch(editor:GetSelectedText()..'\n', "(.-)\r?\n") do
-      table.insert(buf, line)
-    end
-    if #buf > 0 then
-      local newline
-      if #(buf[#buf]) == 0 then newline = table.remove(buf) end
-      table.sort(buf)
-      -- add new line at the end if it was there
-      if newline then table.insert(buf, newline) end
-      editor:ReplaceSelection(table.concat(buf,"\n"))
-    end
+    processSelection(editor, function(buf) reIndent(editor, buf) end)
   end)
-frame:Connect(ID_SORT, wx.wxEVT_UPDATE_UI, onUpdateUIEditMenu)
 
 frame:Connect(ID_FOLD, wx.wxEVT_COMMAND_MENU_SELECTED,
-  function (event)
-    FoldSome()
-  end)
-frame:Connect(ID_FOLD, wx.wxEVT_UPDATE_UI, onUpdateUIEditMenu)
+  function (event) FoldSome() end)
 
 local BOOKMARK_MARKER = StylesGetMarker("bookmark")
 local BOOKMARK_MARKER_VALUE = 2^BOOKMARK_MARKER
@@ -262,18 +326,20 @@ local function bookmarkNext()
   local editor = GetEditor()
   local line = editor:MarkerNext(editor:GetCurrentLine()+1, BOOKMARK_MARKER_VALUE)
   if line == -1 then line = editor:MarkerNext(0, BOOKMARK_MARKER_VALUE) end
-  if line ~= -1 then editor:GotoLine(line) end
+  if line ~= -1 then
+    editor:GotoLine(line)
+    editor:EnsureVisibleEnforcePolicy(line)
+  end
 end
 
 local function bookmarkPrev()
   local editor = GetEditor()
   local line = editor:MarkerPrevious(editor:GetCurrentLine()-1, BOOKMARK_MARKER_VALUE)
   if line == -1 then line = editor:MarkerPrevious(editor:GetLineCount(), BOOKMARK_MARKER_VALUE) end
-  if line ~= -1 then editor:GotoLine(line) end
-end
-
-for _, event in pairs({ID_BOOKMARKTOGGLE, ID_BOOKMARKNEXT, ID_BOOKMARKPREV}) do
-  frame:Connect(event, wx.wxEVT_UPDATE_UI, onUpdateUIisEditor)
+  if line ~= -1 then
+    editor:GotoLine(line)
+    editor:EnsureVisibleEnforcePolicy(line)
+  end
 end
 
 frame:Connect(ID_BOOKMARKTOGGLE, wx.wxEVT_COMMAND_MENU_SELECTED, bookmarkToggle)

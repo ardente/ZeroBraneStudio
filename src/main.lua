@@ -76,6 +76,11 @@ ide = {
     },
     arg = {}, -- command line arguments
 
+    format = { -- various formatting strings
+      menurecentprojects = "%f | %i",
+      apptitle = "%T - %F",
+    },
+
     activateoutput = false, -- activate output/console on Run/Debug/Compile
     unhidewindow = false, -- to unhide a gui window
     allowinteractivescript = false, -- allow interaction in the output window
@@ -482,11 +487,79 @@ end
 
 if app.postinit then app.postinit() end
 
-if ide.osname == 'Macintosh' then
-  ide.frame:SetAcceleratorTable(wx.wxAcceleratorTable({
-     wx.wxAcceleratorEntry(wx.wxACCEL_CTRL, ('M'):byte(), ID_VIEWMINIMIZE)
-  }))
+-- this is a workaround for a conflict between global shortcuts and local
+-- shortcuts (like F2) used in the file tree or a watch panel.
+-- because of several issues on OSX (as described in details in this thread:
+-- https://groups.google.com/d/msg/wx-dev/juJj_nxn-_Y/JErF1h24UFsJ),
+-- the workaround installs a global event handler that manually re-routes
+-- conflicting events when the current focus is on a proper object.
+-- non-conflicting shortcuts are handled through key-down events.
+local remap = {
+  [ID_ADDWATCH]    = ide:GetWatch(),
+  [ID_EDITWATCH]   = ide:GetWatch(),
+  [ID_DELETEWATCH] = ide:GetWatch(),
+  [ID_RENAMEFILE]  = ide:GetProjectTree(),
+  [ID_DELETEFILE]  = ide:GetProjectTree(),
+}
+local function remapkey(event)
+  local keycode = event:GetKeyCode()
+  local mod = event:GetModifiers()
+  for id, obj in pairs(remap) do
+    if obj:FindFocus():GetId() == obj:GetId() then
+      local ae = wx.wxAcceleratorEntry(); ae:FromString(KSC(id))
+      if ae:GetFlags() == mod and ae:GetKeyCode() == keycode then
+        obj:AddPendingEvent(wx.wxCommandEvent(wx.wxEVT_COMMAND_MENU_SELECTED, id))
+        return
+      end
+    end
+  end
+  event:Skip()
 end
+ide:GetWatch():Connect(wx.wxEVT_KEY_DOWN, remapkey)
+ide:GetProjectTree():Connect(wx.wxEVT_KEY_DOWN, remapkey)
+
+local function resolveConflict(localid, globalid)
+  return function(event)
+    local shortcut = ide.config.keymap[localid]
+    for id, obj in pairs(remap) do
+      if ide.config.keymap[id]:lower() == shortcut:lower() then
+        local focus = obj:FindFocus()
+        if focus and focus:GetId() == obj:GetId() then
+          obj:AddPendingEvent(wx.wxCommandEvent(wx.wxEVT_COMMAND_MENU_SELECTED, id))
+          return
+        -- also need to check for children of objects
+        -- to avoid re-triggering events when labels are being edited
+        elseif focus and focus:GetParent():GetId() == obj:GetId() then
+          return
+        end
+      end
+    end
+    ide.frame:AddPendingEvent(wx.wxCommandEvent(wx.wxEVT_COMMAND_MENU_SELECTED, globalid))
+  end
+end
+
+local at = {}
+for lid in pairs(remap) do
+  local shortcut = ide.config.keymap[lid]
+  -- find a (potential) conflict for this shortcut (if any)
+  for gid, ksc in pairs(ide.config.keymap) do
+    -- if the same shortcut is used elsewhere (not one of IDs being checked)
+    if shortcut:lower() == ksc:lower() and not remap[gid] then
+      local fakeid = NewID()
+      ide.frame:Connect(fakeid, wx.wxEVT_COMMAND_MENU_SELECTED,
+        resolveConflict(lid, gid))
+
+      local ae = wx.wxAcceleratorEntry(); ae:FromString(ksc)
+      table.insert(at, wx.wxAcceleratorEntry(ae:GetFlags(), ae:GetKeyCode(), fakeid))
+    end
+  end
+end
+
+if ide.osname == 'Macintosh' then
+  table.insert(at, wx.wxAcceleratorEntry(wx.wxACCEL_CTRL, ('M'):byte(), ID_VIEWMINIMIZE))
+end
+ide.frame:SetAcceleratorTable(wx.wxAcceleratorTable(at))
+
 -- only set menu bar *after* postinit handler as it may include adding
 -- app-specific menus (Help/About), which are not recognized by MacOS
 -- as special items unless SetMenuBar is done after menus are populated.
@@ -505,6 +578,13 @@ if statusbarfix then ide.frame:GetStatusBar():Show(true) end
 ide.frame:Show(true)
 
 if statusbarfix then ide.frame:GetStatusBar():Show(false) end
+
+-- somehow having wxAuiToolbar "steals" the focus from the editor on OSX;
+-- have to set the focus implicitly on the current editor (if any)
+if ide.osname == 'Macintosh' then
+  local editor = GetEditor()
+  if editor then editor:SetFocus() end
+end
 
 wx.wxGetApp():MainLoop()
 

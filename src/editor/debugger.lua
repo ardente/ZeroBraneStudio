@@ -18,7 +18,7 @@ debugger.portnumber = ide.config.debugger.port or mobdebug.port -- the port # to
 debugger.watchCtrl = nil -- the watch ctrl that shows watch information
 debugger.stackCtrl = nil -- the stack ctrl that shows stack information
 debugger.toggleview = {
-  stackpanel = false, watchpanel = false, toolbar = true }
+  stackpanel = false, watchpanel = false, toolbar = false }
 debugger.hostname = ide.config.debugger.hostname or (function()
   local hostname = socket.dns.gethostname()
   return hostname and socket.dns.toip(hostname) and hostname or "localhost"
@@ -397,10 +397,7 @@ debugger.shell = function(expression, isstatement)
         local addedret, forceexpression = true, expression:match("^%s*=%s*")
         expression = expression:gsub("^%s*=%s*","")
         local _, values, err = debugger.evaluate(expression)
-        if not forceexpression and err and
-          (err:find("'?<eof>'? expected near '") or
-           err:find("'%(' expected near") or
-           err:find("unexpected symbol near '")) then
+        if not forceexpression and err then
           _, values, err = debugger.execute(expression)
           addedret = false
         end
@@ -430,7 +427,8 @@ debugger.shell = function(expression, isstatement)
 
         -- refresh Stack and Watch windows if executed a statement (and no err)
         if isstatement and not err and not addedret and #values == 0 then
-          updateStackSync() updateWatchesSync() end
+          updateStackSync() updateWatchesSync()
+        end
       end)
   end
 end
@@ -492,7 +490,8 @@ debugger.listen = function(start)
       if not options.allowediting then options.allowediting = ide.config.debugger.allowediting end
 
       if not debugger.scratchpad and not options.allowediting then
-        SetAllEditorsReadOnly(true) end
+        SetAllEditorsReadOnly(true)
+      end
 
       debugger.server = copas.wrap(skt)
       debugger.socket = skt
@@ -520,6 +519,12 @@ debugger.listen = function(start)
       -- load the remote file into the debugger
       -- set basedir first, before loading to make sure that the path is correct
       debugger.handle("basedir " .. debugger.basedir)
+
+      local init = options.init or ide.config.debugger.init
+      if init then
+        local _, _, err = debugger.execute(init)
+        if err then DisplayOutputLn(TR("Ignored error in debugger initialization code: %s."):format(err)) end
+      end
 
       reSetBreakpoints()
 
@@ -680,7 +685,9 @@ debugger.handle = function(command, server, options)
   local verbose = ide.config.debugger.verbose
   local osexit, gprint
   osexit, os.exit = os.exit, function () end
-  gprint, _G.print = _G.print, function (...) if verbose then DisplayOutputLn(...) end end
+  gprint, _G.print = _G.print, function (...)
+    if verbose then DisplayOutputLn(...) end
+  end
 
   debugger.running = true
   if verbose then DisplayOutputLn("Debugger sent (command):", command) end
@@ -1043,16 +1050,6 @@ local function debuggerCreateWatchWindow()
 
   watchCtrl:Connect(wx.wxEVT_CONTEXT_MENU,
     function (event) watchCtrl:PopupMenu(watchMenu) end)
-
-  watchCtrl:Connect(wx.wxEVT_KEY_DOWN,
-    function (event)
-      local keycode = event:GetKeyCode()
-      if (keycode == wx.WXK_DELETE) then return deleteWatch()
-      elseif (keycode == wx.WXK_INSERT) then return addWatch()
-      elseif (keycode == wx.WXK_F2) then return editWatch()
-      end
-      event:Skip()
-    end)
 
   watchCtrl:Connect(ID_ADDWATCH, wx.wxEVT_COMMAND_MENU_SELECTED, addWatch)
 

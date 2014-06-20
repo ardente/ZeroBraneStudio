@@ -4,10 +4,10 @@
 local funccall = "([A-Za-z_][A-Za-z0-9_]*)%s*"
 
 return {
-  exts = {"hlsl","fx","fxh",},
+  exts = {"hlsl","fx","fxh","usf",},
   lexer = wxstc.wxSTC_LEX_CPP,
   apitype = "hlsl",
-  sep = "%.",
+  sep = ".",
   linecomment = "//",
   
   isfncall = function(str)

@@ -130,6 +130,7 @@ function ProjectUpdateProjectDir(projdir,skiptree)
 
   ide.config.path.projectdir = projdir ~= "" and projdir or nil
   frame:SetStatusText(projdir)
+  frame:SetTitle(ExpandPlaceholders(ide.config.format.apptitle))
   if (not skiptree) then
     ide.filetree:updateProjectDir(projdir)
   end
@@ -258,7 +259,7 @@ frame:Connect(ID_TOGGLEBREAKPOINT, wx.wxEVT_COMMAND_MENU_SELECTED,
   end)
 frame:Connect(ID_TOGGLEBREAKPOINT, wx.wxEVT_UPDATE_UI,
   function (event)
-    local editor = GetEditor()
+    local editor = GetEditorWithFocus(GetEditor())
     event:Enable((ide.interpreter) and (ide.interpreter.hasdebugger) and (editor ~= nil)
       and (not debugger.scratchpad))
   end)
