@@ -539,19 +539,6 @@ function FoldSome()
   editor:EnsureCaretVisible()
 end
 
-function EnsureRangeVisible(posStart, posEnd)
-  local editor = GetEditor()
-  if posStart > posEnd then
-    posStart, posEnd = posEnd, posStart
-  end
-
-  local lineStart = editor:LineFromPosition(posStart)
-  local lineEnd = editor:LineFromPosition(posEnd)
-  for line = lineStart, lineEnd do
-    editor:EnsureVisibleEnforcePolicy(line)
-  end
-end
-
 function SetAllEditorsReadOnly(enable)
   for _, document in pairs(openDocuments) do
     document.editor:SetReadOnly(enable)
@@ -725,17 +712,23 @@ function SetOpenTabs(params)
   end
   DisplayOutputLn(TR("Found auto-recovery record and restored saved session."))
   for _,doc in ipairs(nametab) do
-    local editor = doc.filename and LoadFile(doc.filename,nil,true,true) or NewFile()
-    local opendoc = openDocuments[editor:GetId()]
-    if doc.content then
-      notebook:SetPageText(opendoc.index, doc.tabname)
-      editor:SetText(doc.content)
-      if doc.filename and opendoc.modTime and doc.modified < opendoc.modTime:GetTicks() then
-        DisplayOutputLn(TR("File '%s' has more recent timestamp than restored '%s'; please review before saving.")
-          :format(doc.filename, doc.tabname))
+    -- check for missing file is no content is stored
+    if doc.filepath and not doc.content and not wx.wxFileExists(doc.filepath) then
+      DisplayOutputLn(TR("File '%s' is missing and can't be recovered.")
+        :format(doc.filepath))
+    else
+      local editor = doc.filepath and LoadFile(doc.filepath,nil,true,true) or NewFile(doc.filename)
+      local opendoc = openDocuments[editor:GetId()]
+      if doc.content then
+        editor:SetText(doc.content)
+        if doc.filepath and opendoc.modTime and doc.modified < opendoc.modTime:GetTicks() then
+          DisplayOutputLn(TR("File '%s' has more recent timestamp than restored '%s'; please review before saving.")
+            :format(doc.filepath, doc.tabname))
+        end
+        SetDocumentModified(editor:GetId(), true)
       end
+      editor:GotoPosDelayed(doc.cursorpos or 0)
     end
-    editor:GotoPosDelayed(doc.cursorpos or 0)
   end
   notebook:SetSelection(params and params.index or 0)
   SetEditorSelection()
@@ -745,7 +738,8 @@ local function getOpenTabs()
   local opendocs = {}
   for _, document in pairs(ide.openDocuments) do
     table.insert(opendocs, {
-      filename = document.filePath,
+      filename = document.fileName,
+      filepath = document.filePath,
       tabname = notebook:GetPageText(document.index),
       modified = document.modTime and document.modTime:GetTicks(), -- get number of seconds
       content = document.isModified and document.editor:GetText() or nil,
