@@ -469,14 +469,14 @@ SettingsRestoreView()
 -- Load the filenames
 
 do
-  for _, fileName in ipairs(filenames) do
-    if fileName ~= "--" then
-      if wx.wxDirExists(fileName) then
-        local dir = wx.wxFileName.DirName(fileName)
+  for _, filename in ipairs(filenames) do
+    if filename ~= "--" then
+      if wx.wxDirExists(filename) then
+        local dir = wx.wxFileName.DirName(filename)
         dir:Normalize() -- turn into absolute path if needed
         ProjectUpdateProjectDir(dir:GetFullPath())
-      else
-        LoadFile(fileName, nil, true)
+      elseif not ActivateFile(filename) then
+        DisplayOutputLn(("Can't open file '%s': %s"):format(filename, wx.wxSysErrorMsg()))
       end
     end
   end
