@@ -24,6 +24,19 @@ debugger.hostname = ide.config.debugger.hostname or (function()
   return hostname and socket.dns.toip(hostname) and hostname or "localhost"
 end)()
 
+do
+  local getBitmap = (ide.app.createbitmap or wx.wxArtProvider.GetBitmap)
+  local size = wx.wxSize(16,16)
+  local imglist = wx.wxImageList(16,16)
+  -- 0 = stack call
+  imglist:Add(getBitmap(wx.wxART_GO_FORWARD, wx.wxART_OTHER, size))
+  -- 1 = local variables
+  imglist:Add(getBitmap(wx.wxART_LIST_VIEW, wx.wxART_OTHER, size))
+  -- 2 = upvalues
+  imglist:Add(getBitmap(wx.wxART_REPORT_VIEW, wx.wxART_OTHER, size))
+  debugger.imglist = imglist
+end
+
 local notebook = ide.frame.notebook
 
 local CURRENT_LINE_MARKER = StylesGetMarker("currentline")
@@ -443,6 +456,44 @@ local function stoppedAtBreakpoint(file, line)
   return breakpoint > -1 and breakpoint == current
 end
 
+local function mapRemotePath(basedir, file, line, method)
+  -- file is /foo/bar/my.lua; basedir is d:\local\path\
+  -- check for d:\local\path\my.lua, d:\local\path\bar\my.lua, ...
+  -- wxwidgets on Windows handles \\ and / as separators, but on OSX
+  -- and Linux it only handles 'native' separator;
+  -- need to translate for GetDirs to work.
+  local file = file:gsub("\\", "/")
+  local parts = wx.wxFileName(file):GetDirs()
+  local name = wx.wxFileName(file):GetFullName()
+
+  -- find the longest remote path that can be mapped locally
+  local longestpath, remotedir
+  while true do
+    local mapped = GetFullPathIfExists(basedir, name)
+    if mapped then
+      longestpath = mapped
+      remotedir = file:gsub(q(name):gsub("/", ".").."$", "")
+    end
+    if #parts == 0 then break end
+    name = table.remove(parts, #parts) .. "/" .. name
+  end
+
+  -- if found a local mapping under basedir
+  local activated = longestpath and activateDocument(longestpath, line, method or activate.NOREPORT)
+  if activated then
+    -- find remote basedir by removing the tail from remote file
+    debugger.handle("basedir " .. debugger.basedir .. "\t" .. remotedir)
+    -- reset breakpoints again as remote basedir has changed
+    reSetBreakpoints()
+    DisplayOutputLn(TR("Mapped remote request for '%s' to '%s'.")
+      :format(remotedir, debugger.basedir))
+
+    return longestpath
+  end
+
+  return nil
+end
+
 debugger.listen = function(start)
   if start == false then
     if debugger.listening then
@@ -583,6 +634,8 @@ debugger.listen = function(start)
             ..":\n"..err)
           return debugger.terminate()
         elseif options.runstart then
+          local file = mapRemotePath(basedir, file, line, activate.CHECKONLY) or file
+
           if stoppedAtBreakpoint(file or startfile, line or 0) then
             activateDocument(file or startfile, line or 0)
             options.runstart = false
@@ -607,36 +660,8 @@ debugger.listen = function(start)
           -- when autoactivation is disabled.
           if not activated and (not wx.wxFileName(file):FileExists()
                                 or wx.wxIsAbsolutePath(file)) then
-            -- file is /foo/bar/my.lua; basedir is d:\local\path\
-            -- check for d:\local\path\my.lua, d:\local\path\bar\my.lua, ...
-            -- wxwidgets on Windows handles \\ and / as separators, but on OSX
-            -- and Linux it only handles 'native' separator;
-            -- need to translate for GetDirs to work.
-            local file = file:gsub("\\", "/")
-            local parts = wx.wxFileName(file):GetDirs()
-            local name = wx.wxFileName(file):GetFullName()
-
-            -- find the longest remote path that can be mapped locally
-            local longestpath, remotedir
-            while true do
-              local mapped = GetFullPathIfExists(basedir, name)
-              if mapped then
-                longestpath = mapped
-                remotedir = file:gsub(q(name):gsub("/", ".").."$", "")
-              end
-              if #parts == 0 then break end
-              name = table.remove(parts, #parts) .. "/" .. name
-            end
-
-            -- if found a local mapping under basedir
-            activated = longestpath and activateDocument(longestpath, line, activate.NOREPORT)
-            if activated then
-              -- find remote basedir by removing the tail from remote file
-              debugger.handle("basedir " .. debugger.basedir .. "\t" .. remotedir)
-              -- reset breakpoints again as remote basedir has changed
-              reSetBreakpoints()
-              DisplayOutputLn(TR("Mapped remote request for '%s' to '%s'.")
-                :format(remotedir, debugger.basedir))
+            if mapRemotePath(basedir, file, line, activate.NOREPORT) then
+              activated = true
             end
           end
 
@@ -893,58 +918,24 @@ debugger.quickeval = function(var, callback)
   end
 end
 
--- need imglist to be a file local variable as SetImageList takes ownership
--- of it and if done inside a function, icons do not work as expected
-local imglist = wx.wxImageList(16,16)
-do
-  local getBitmap = (ide.app.createbitmap or wx.wxArtProvider.GetBitmap)
-  local size = wx.wxSize(16,16)
-  -- 0 = stack call
-  imglist:Add(getBitmap(wx.wxART_GO_FORWARD, wx.wxART_OTHER, size))
-  -- 1 = local variables
-  imglist:Add(getBitmap(wx.wxART_LIST_VIEW, wx.wxART_OTHER, size))
-  -- 2 = upvalues
-  imglist:Add(getBitmap(wx.wxART_REPORT_VIEW, wx.wxART_OTHER, size))
+function DebuggerAddStackWindow()
+  return ide:AddPanel(debugger.stackCtrl, "stackpanel", TR("Stack"))
+end
+
+function DebuggerAddWatchWindow()
+  return ide:AddPanel(debugger.watchCtrl, "watchpanel", TR("Watch"))
 end
 
 local width, height = 360, 200
 
-function debuggerAddWindow(ctrl, panel, name)
-  local notebook = wxaui.wxAuiNotebook(ide.frame, wx.wxID_ANY,
-    wx.wxDefaultPosition, wx.wxDefaultSize,
-    wxaui.wxAUI_NB_DEFAULT_STYLE + wxaui.wxAUI_NB_TAB_EXTERNAL_MOVE
-    - wxaui.wxAUI_NB_CLOSE_ON_ACTIVE_TAB + wx.wxNO_BORDER)
-  notebook:AddPage(ctrl, name, true)
-  notebook:Connect(wxaui.wxEVT_COMMAND_AUINOTEBOOK_BG_DCLICK,
-    function() PaneFloatToggle(notebook) end)
-
-  local mgr = ide.frame.uimgr
-  mgr:AddPane(notebook, wxaui.wxAuiPaneInfo():
-              Name(panel):Float():CaptionVisible(false):PaneBorder(false):
-              MinSize(width/2,height/2):
-              BestSize(width,height):FloatingSize(width,height):
-              PinButton(true):Hide())
-  mgr.defaultPerspective = mgr:SavePerspective() -- resave default perspective
-
-  return notebook
-end
-
-function DebuggerAddStackWindow()
-  return debuggerAddWindow(debugger.stackCtrl, "stackpanel", TR("Stack"))
-end
-
-function DebuggerAddWatchWindow()
-  return debuggerAddWindow(debugger.watchCtrl, "watchpanel", TR("Watch"))
-end
-
-function debuggerCreateStackWindow()
+local function debuggerCreateStackWindow()
   local stackCtrl = wx.wxTreeCtrl(ide.frame, wx.wxID_ANY,
     wx.wxDefaultPosition, wx.wxSize(width, height),
     wx.wxTR_LINES_AT_ROOT + wx.wxTR_HAS_BUTTONS + wx.wxTR_SINGLE + wx.wxTR_HIDE_ROOT)
 
   debugger.stackCtrl = stackCtrl
 
-  stackCtrl:SetImageList(imglist)
+  stackCtrl:AssignImageList(debugger.imglist)
 
   stackCtrl:Connect(wx.wxEVT_COMMAND_TREE_ITEM_EXPANDING,
     function (event)
@@ -1049,7 +1040,7 @@ local function debuggerCreateWatchWindow()
   end
 
   watchCtrl:Connect(wx.wxEVT_CONTEXT_MENU,
-    function (event) watchCtrl:PopupMenu(watchMenu) end)
+    function () watchCtrl:PopupMenu(watchMenu) end)
 
   watchCtrl:Connect(ID_ADDWATCH, wx.wxEVT_COMMAND_MENU_SELECTED, addWatch)
 
@@ -1146,15 +1137,16 @@ function DebuggerStop(resetpid)
   if resetpid then debugger.pid = nil end
 end
 
-function DebuggerMakeFileName(editor, filePath)
-  return filePath or ide.config.default.fullname
+local function debuggerMakeFileName(editor)
+  return ide:GetDocument(editor):GetFilePath()
+  or ide:GetDocument(editor):GetFileName()
+  or ide.config.default.fullname
 end
 
 function DebuggerToggleBreakpoint(editor, line)
   local markers = editor:MarkerGet(line)
-  local id = editor:GetId()
   local filePath = debugger.editormap and debugger.editormap[editor]
-    or DebuggerMakeFileName(editor, ide.openDocuments[id].filePath)
+    or debuggerMakeFileName(editor)
   if bit.band(markers, BREAKPOINT_MARKER_VALUE) > 0 then
     editor:MarkerDelete(line, BREAKPOINT_MARKER)
     if debugger.server then debugger.breakpoint(filePath, line+1, false) end
@@ -1187,8 +1179,7 @@ function DebuggerRefreshScratchpad()
       end
     else
       local clear = ide.frame.menuBar:IsChecked(ID_CLEAROUTPUT)
-      local filePath = DebuggerMakeFileName(scratchpadEditor,
-        ide.openDocuments[scratchpadEditor:GetId()].filePath)
+      local filePath = debuggerMakeFileName(scratchpadEditor)
 
       -- wrap into a function call to make "return" to work with scratchpad
       code = "(function()"..code.."\nend)()"

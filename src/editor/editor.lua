@@ -141,7 +141,7 @@ end
 
 local function navigateToPosition(editor, fromPosition, toPosition, length)
   table.insert(editor.jumpstack, fromPosition)
-  editor:GotoPos(toPosition)
+  editor:GotoPosEnforcePolicy(toPosition)
   if length then
     editor:SetAnchor(toPosition + length)
   end
@@ -150,7 +150,7 @@ end
 local function navigateBack(editor)
   if #editor.jumpstack == 0 then return end
   local pos = table.remove(editor.jumpstack)
-  editor:GotoPos(pos)
+  editor:GotoPosEnforcePolicy(pos)
   return true
 end
 
@@ -664,7 +664,7 @@ function CreateEditor()
   -- populate cache with Ctrl-<letter> combinations for workaround on Linux
   -- http://wxwidgets.10942.n7.nabble.com/Menu-shortcuts-inconsistentcy-issue-td85065.html
   for id, shortcut in pairs(ide.config.keymap) do
-    local key = shortcut:match('^Ctrl[-+](%w)$')
+    local key = shortcut:match('^Ctrl[-+](.)$')
     if key then editor.ctrlcache[key:byte()] = id end
   end
 
@@ -774,6 +774,11 @@ function CreateEditor()
     editor:AutoCompStops([[ \n\t=-+():.,;*/!"'$%&~'#°^@?´`<>][|}{]])
   end
 
+  function editor:GotoPosEnforcePolicy(pos)
+    self:GotoPos(pos)
+    self:EnsureVisibleEnforcePolicy(self:LineFromPosition(pos))
+  end
+
   -- GotoPos should work by itself, but it doesn't (wx 2.9.5).
   -- This is likely because the editor window hasn't been refreshed yet,
   -- so its LinesOnScreen method returns 0/-1, which skews the calculations.
@@ -790,19 +795,19 @@ function CreateEditor()
           if ide.osname ~= 'Macintosh' then self:GotoPos(pos) end
         else
           redolater = nil
-          self:GotoPos(pos)
-          self:EnsureVisibleEnforcePolicy(self:LineFromPosition(pos))
+          self:GotoPosEnforcePolicy(pos)
         end
       elseif not badtime and redolater then
         -- reset the left margin first to make sure that the position
         -- is set "from the left" to get the best content displayed.
         self:SetXOffset(0)
-        self:GotoPos(redolater)
-        self:EnsureVisibleEnforcePolicy(self:LineFromPosition(redolater))
+        self:GotoPosEnforcePolicy(redolater)
         redolater = nil
       end
     end
   end
+
+  function editor:SetupKeywords(...) return SetupKeywords(self, ...) end
 
   editor.ev = {}
   editor:Connect(wxstc.wxEVT_STC_MARGINCLICK,
@@ -882,11 +887,12 @@ function CreateEditor()
           local indent = editor:GetLineIndentation(line - 1)
           local linedone = editor:GetLine(line - 1)
 
-          -- if the indentation is 0 and the current line is not empty
-          -- then take indentation from the current line (instead of the
-          -- previous one). This may happen when CR is hit at the beginning
-          -- of a line (rather than at the end).
-          if indent == 0 and not linetx:match("^[\010\013]*$") then
+          -- if the indentation is 0 and the current line is not empty,
+          -- but the previous line is empty, then take indentation from the
+          -- current line (instead of the previous one). This may happen when
+          -- CR is hit at the beginning of a line (rather than at the end).
+          if indent == 0 and not linetx:match("^[\010\013]*$")
+          and linedone:match("^[\010\013]*$") then
             indent = editor:GetLineIndentation(line)
           end
 
@@ -1032,7 +1038,9 @@ function CreateEditor()
   -- where refresh of R/W and R/O status in the status bar is delayed.
 
   editor:Connect(wxstc.wxEVT_STC_PAINTED,
-    function ()
+    function (event)
+      PackageEventHandle("onEditorPainted", editor, event)
+
       if ide.osname == 'Windows' then
         updateStatusText(editor)
 
@@ -1047,7 +1055,9 @@ function CreateEditor()
     end)
 
   editor:Connect(wxstc.wxEVT_STC_UPDATEUI,
-    function ()
+    function (event)
+      PackageEventHandle("onEditorUpdateUI", editor, event)
+
       if ide.osname ~= 'Windows' then updateStatusText(editor) end
 
       editor:GotoPosDelayed()
@@ -1191,6 +1201,10 @@ function CreateEditor()
         -- if no "jump back" is needed, then do normal processing as this
         -- combination can be mapped to some action
         if not navigateBack(editor) then event:Skip() end
+      elseif (keycode == wx.WXK_DELETE and mod == wx.wxMOD_SHIFT)
+          or (keycode == wx.WXK_INSERT and mod == wx.wxMOD_CONTROL) then
+        ide.frame:AddPendingEvent(wx.wxCommandEvent(
+          wx.wxEVT_COMMAND_MENU_SELECTED, keycode == wx.WXK_INSERT and ID_COPY or ID_CUT))
       elseif ide.osname == "Unix" and ide.wxver >= "2.9.5"
       and mod == wx.wxMOD_CONTROL and editor.ctrlcache[keycode] then
         ide.frame:AddPendingEvent(wx.wxCommandEvent(
@@ -1477,5 +1491,6 @@ funclist:Connect(wx.wxEVT_COMMAND_CHOICE_SELECTED,
       editor:GotoLine(l)
       editor:SetFocus()
       editor:SetSTCFocus(true)
+      editor:EnsureVisibleEnforcePolicy(l)
     end
   end)

@@ -16,7 +16,7 @@ local CURRENT_LINE_MARKER_VALUE = 2^CURRENT_LINE_MARKER
 function NewFile(filename)
   filename = filename or ide.config.default.fullname
   local editor = CreateEditor()
-  SetupKeywords(editor, GetFileExt(filename))
+  editor:SetupKeywords(GetFileExt(filename))
   local doc = AddEditor(editor, filename)
   if doc then
     PackageEventHandle("onEditorNew", editor)
@@ -71,7 +71,7 @@ function LoadFile(filePath, editor, file_must_exist, skipselection)
   editor = editor or findUnusedEditor() or CreateEditor()
 
   editor:Freeze()
-  SetupKeywords(editor, GetFileExt(filePath))
+  editor:SetupKeywords(GetFileExt(filePath))
   editor:MarkerDeleteAll(-1)
 
   -- remove BOM from UTF-8 encoded files; store BOM to add back when saving
@@ -109,13 +109,16 @@ function LoadFile(filePath, editor, file_must_exist, skipselection)
   editor:Colourise(0, -1)
   editor:Thaw()
 
+  local edcfg = ide.config.editor
   if current then editor:GotoPos(current) end
-  if (file_text and ide.config.editor.autotabs) then
-    local found = string.find(file_text,"\t") ~= nil
-    editor:SetUseTabs(found)
+  if (file_text and edcfg.autotabs) then
+    -- use tabs if they are already used
+    -- or if "usetabs" is set and no space indentation is used in a file
+    editor:SetUseTabs(string.find(file_text, "\t") ~= nil
+      or edcfg.usetabs and (file_text:find("%f[^\r\n] ") or file_text:find("^ ")) == nil)
   end
   
-  if (file_text and ide.config.editor.checkeol) then
+  if (file_text and edcfg.checkeol) then
     -- Auto-detect CRLF/LF line-endings
     local foundcrlf = string.find(file_text,"\r\n") ~= nil
     local foundlf = (string.find(file_text,"[^\r]\n") ~= nil)
@@ -338,7 +341,7 @@ function SaveFileAs(editor)
       if ext ~= GetFileExt(filePath) then
         -- new extension, so setup new keywords and re-apply indicators
         editor:ClearDocumentStyle() -- remove styles from the document
-        SetupKeywords(editor, GetFileExt(filePath))
+        editor:SetupKeywords(GetFileExt(filePath))
         IndicateAll(editor)
         MarkupStyle(editor)
       end
@@ -576,14 +579,19 @@ function StripShebang(code) return (code:gsub("^#!.-\n", "\n")) end
 
 local compileOk, compileTotal = 0, 0
 function CompileProgram(editor, params)
-  local params = { jumponerror = (params or {}).jumponerror ~= false,
-    reportstats = (params or {}).reportstats ~= false }
-  local id = editor:GetId()
-  local filePath = DebuggerMakeFileName(editor, openDocuments[id].filePath)
+  local params = {
+    jumponerror = (params or {}).jumponerror ~= false,
+    reportstats = (params or {}).reportstats ~= false,
+    keepoutput = (params or {}).keepoutput,
+  }
+  local doc = ide:GetDocument(editor)
+  local filePath = doc:GetFilePath() or doc:GetFileName()
   local func, err = loadstring(StripShebang(editor:GetText()), '@'..filePath)
   local line = not func and tonumber(err:match(":(%d+)%s*:")) or nil
 
-  if ide.frame.menuBar:IsChecked(ID_CLEAROUTPUT) then ClearOutput() end
+  if not params.keepoutput and ide.frame.menuBar:IsChecked(ID_CLEAROUTPUT) then
+    ClearOutput()
+  end
 
   compileTotal = compileTotal + 1
   if func then
