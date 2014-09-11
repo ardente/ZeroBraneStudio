@@ -569,6 +569,7 @@ end
 function ClearAllCurrentLineMarkers()
   for _, document in pairs(openDocuments) do
     document.editor:MarkerDeleteAll(CURRENT_LINE_MARKER)
+    document.editor:Refresh() -- needed for background markers that don't get refreshed (wx2.9.5)
   end
 end
 
@@ -797,10 +798,11 @@ local function saveHotExit()
 end
 
 local function saveAutoRecovery(force)
+  if not ide.config.autorecoverinactivity then return end
+
   local lastupdated = ide.session.lastupdated
   if not force then
-    if not ide.config.autorecoverinactivity or not lastupdated then return end
-    if lastupdated < (ide.session.lastsaved or 0) then return end
+    if not lastupdated or lastupdated < (ide.session.lastsaved or 0) then return end
   end
 
   local now = os.time()

@@ -43,10 +43,8 @@ ide.findReplace = {
 }
 local findReplace = ide.findReplace
 
-local lastEditor
 function findReplace:GetEditor()
-  lastEditor = findReplace.oveditor or GetEditorWithFocus() or lastEditor
-  return lastEditor or GetEditor()
+  return findReplace.oveditor or GetEditorWithFocus() or GetEditor()
 end
 
 -------------------- Find replace dialog
@@ -297,7 +295,7 @@ local function ProcInFiles(startdir,mask,subdirs,replace)
           end
 
           -- give time to the UI to refresh
-          if TimeGet() - start > 0.25 then wx.wxYield() end
+          if TimeGet() - start > 0.25 then ide:Yield() end
           if not findReplace.dialog:IsShown() then
             DisplayOutputLn(TR("Cancelled by the user."))
             break

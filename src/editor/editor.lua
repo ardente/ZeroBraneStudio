@@ -669,7 +669,7 @@ function CreateEditor()
   end
 
   -- populate editor keymap with configured combinations
-  for _, map in ipairs(edcfg.keymap) do
+  for _, map in ipairs(edcfg.keymap or {}) do
     local key, mod, cmd, os = unpack(map)
     if not os or os == ide.osname then
       if cmd then
@@ -728,7 +728,7 @@ function CreateEditor()
 
   editor:SetMarginWidth(margin.MARKER, 18)
   editor:SetMarginType(margin.MARKER, wxstc.wxSTC_MARGIN_SYMBOL)
-  editor:SetMarginMask(margin.MARKER, bit.bnot(wxstc.wxSTC_MASK_FOLDERS))
+  editor:SetMarginMask(margin.MARKER, 0xffffffff - wxstc.wxSTC_MASK_FOLDERS)
   editor:SetMarginSensitive(margin.MARKER, true)
 
   editor:MarkerDefine(StylesGetMarker("currentline"))
@@ -1281,6 +1281,7 @@ function CreateEditor()
         or ("  (%d)"):format(#instances+(instances[0] and 1 or 0))
       local line = instances and instances[0] and editor:LineFromPosition(instances[0]-1)+1
       local def =  line and " ("..TR("on line %d"):format(line)..")" or ""
+      local selections = ide.wxver >= "2.9.5" and editor:GetSelections() or 1
 
       local menu = wx.wxMenu {
         { ID_UNDO, TR("&Undo") },
@@ -1293,6 +1294,7 @@ function CreateEditor()
         { },
         { ID_GOTODEFINITION, TR("Go To Definition")..def },
         { ID_RENAMEALLINSTANCES, TR("Rename All Instances")..occurrences },
+        { ID_REPLACEALLSELECTIONS, TR("Replace All Selections") },
         { },
         { ID_QUICKADDWATCH, TR("Add Watch Expression") },
         { ID_QUICKEVAL, TR("Evaluate In Console") },
@@ -1300,7 +1302,9 @@ function CreateEditor()
       }
 
       menu:Enable(ID_GOTODEFINITION, instances and instances[0])
-      menu:Enable(ID_RENAMEALLINSTANCES, instances and (instances[0] or #instances > 0))
+      menu:Enable(ID_RENAMEALLINSTANCES, instances and (instances[0] or #instances > 0)
+        or editor:GetSelectionStart() ~= editor:GetSelectionEnd())
+      menu:Enable(ID_REPLACEALLSELECTIONS, selections > 1)
       menu:Enable(ID_QUICKADDWATCH, value ~= nil)
       menu:Enable(ID_QUICKEVAL, value ~= nil)
 
@@ -1331,12 +1335,49 @@ function CreateEditor()
   editor:Connect(ID_RENAMEALLINSTANCES, wx.wxEVT_COMMAND_MENU_SELECTED,
     function(event)
       if value and pos then
+        if not (instances and (instances[0] or #instances > 0)) then
+          -- if multiple instances (of a variable) are not detected,
+          -- then simply find all instances of (selected) `value`
+          instances = {}
+          local length, pos = editor:GetLength(), 0
+          while true do
+            editor:SetTargetStart(pos)
+            editor:SetTargetEnd(length)
+            pos = editor:SearchInTarget(value)
+            if pos == -1 then break end
+            table.insert(instances, pos+1)
+            pos = pos + #value
+          end
+        end
         selectAllInstances(instances, value, pos)
       end
     end)
 
+  editor:Connect(ID_REPLACEALLSELECTIONS, wx.wxEVT_COMMAND_MENU_SELECTED,
+    function(event)
+      local main = editor:GetMainSelection()
+      local text = wx.wxGetTextFromUser(
+        TR("Enter replacement text"),
+        TR("Replace All Selections"),
+        editor:GetTextRange(editor:GetSelectionNStart(main), editor:GetSelectionNEnd(main))
+      )
+      if not text or text == "" then return end
+
+      editor:BeginUndoAction()
+      for s = 0, editor:GetSelections()-1 do
+        local selst, selend = editor:GetSelectionNStart(s), editor:GetSelectionNEnd(s)
+        editor:SetTargetStart(selst)
+        editor:SetTargetEnd(selend)
+        editor:ReplaceTarget(text)
+        editor:SetSelectionNStart(s, selst)
+        editor:SetSelectionNEnd(s, selst+#text)
+      end
+      editor:EndUndoAction()
+      editor:SetMainSelection(main)
+    end)
+
   editor:Connect(ID_QUICKADDWATCH, wx.wxEVT_COMMAND_MENU_SELECTED,
-    function(event) DebuggerAddWatch(value) end)
+    function(event) ide:AddWatch(value) end)
 
   editor:Connect(ID_QUICKEVAL, wx.wxEVT_COMMAND_MENU_SELECTED,
     function(event) ShellExecuteCode(value) end)

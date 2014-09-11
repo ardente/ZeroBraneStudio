@@ -82,14 +82,20 @@ function ide:GetMainFrame() return self.frame end
 function ide:GetUIManager() return self.frame.uimgr end
 function ide:GetDocument(ed) return self.openDocuments[ed:GetId()] end
 function ide:GetDocuments() return self.openDocuments end
-function ide:FindMenuItem(menu, itemid)
+function ide:FindMenuItem(itemid, menu)
+  local item, imenu = ide:GetMenuBar():FindItem(itemid, menu)
+  if menu and not item then item = menu:FindItem(itemid) end
+  if not item then return end
+  menu = menu or imenu
+
   for pos = 0, menu:GetMenuItemCount()-1 do
     if menu:FindItemByPosition(pos):GetId() == itemid then
-      return menu:FindItemByPosition(pos), pos
+      return item, menu, pos
     end
   end
-  return nil
+  return
 end
+
 function ide:FindDocument(path)
   local fileName = wx.wxFileName(path)
   for _, doc in pairs(ide.openDocuments) do
@@ -125,7 +131,8 @@ function ide:GetProject() return FileTreeGetDir() end
 function ide:GetLaunchedProcess() return self.debugger and self.debugger.pid end
 function ide:GetProjectTree() return ide.filetree.projtree end
 function ide:GetWatch() return self.debugger and self.debugger.watchCtrl end
-function ide:GetStack() return self.debugger and self.debugger.watchCtrl end
+function ide:GetStack() return self.debugger and self.debugger.stackCtrl end
+function ide:Yield() wx.wxYield() end
 
 function ide:GetSetting(path, setting)
   local settings = self.settings
@@ -134,6 +141,52 @@ function ide:GetSetting(path, setting)
   local ok, value = settings:Read(setting)
   settings:SetPath(curpath)
   return ok and value or nil
+end
+
+function ide:RemoveMenuItem(id, menu)
+  local _, menu, pos = ide:FindMenuItem(id, menu)
+  if menu then
+    menu:Disconnect(id, wx.wxID_ANY, wx.wxEVT_COMMAND_MENU_SELECTED)
+    menu:Disconnect(id, wx.wxID_ANY, wx.wxEVT_UPDATE_UI)
+    menu:Remove(id)
+
+    local positem = menu:FindItemByPosition(pos)
+    if (not positem or positem:GetKind() == wx.wxITEM_SEPARATOR)
+    and (menu:FindItemByPosition(pos-1):GetKind() == wx.wxITEM_SEPARATOR) then
+      menu:Destroy(menu:FindItemByPosition(pos-1))
+    end
+    return true
+  end
+  return false
+end
+
+function ide:AddWatch(watch, value)
+  local mgr = ide.frame.uimgr
+  local pane = mgr:GetPane("watchpanel")
+  if (pane:IsOk() and not pane:IsShown()) then
+    pane:Show()
+    mgr:Update()
+  end
+
+  local watchCtrl = ide.debugger.watchCtrl
+  if not watchCtrl then return end
+
+  local root = watchCtrl:GetRootItem()
+  if not root or not root:IsOk() then return end
+
+  local item = watchCtrl:GetFirstChild(root)
+  while true do
+    if not item:IsOk() then break end
+    if watchCtrl:GetItemExpression(item) == watch then
+      if value then watchCtrl:SetItemText(item, watch .. ' = ' .. tostring(value)) end
+      return item
+    end
+    item = watchCtrl:GetNextSibling(item)
+  end
+
+  local item = watchCtrl:AppendItem(root, watch, 1)
+  watchCtrl:SetItemExpression(item, watch, value)
+  return item
 end
 
 function ide:AddInterpreter(name, interpreter)
