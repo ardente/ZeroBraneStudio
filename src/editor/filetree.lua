@@ -12,26 +12,16 @@ ide.filetree = {
   projdirlist = {},
   projdirpartmap = {},
   projtree = nil,
+  imglist = ide:CreateImageList("PROJECT", "FOLDER", "FILE-KNOWN", "FILE-NORMAL"),
 }
 local filetree = ide.filetree
-
 local iscaseinsensitive = wx.wxFileName("A"):SameAs(wx.wxFileName("a"))
 local pathsep = GetPathSeparator()
 local q = EscapeMagic
+local image = { DIRECTORY = 0, FILEKNOWN = 1, FILEOTHER = 2 }
 
 -- generic tree
 -- ------------
-
-local image = { DIRECTORY = 0, FILEKNOWN = 1, FILEOTHER = 2 }
-
-do
-  local getBitmap = (ide.app.createbitmap or wx.wxArtProvider.GetBitmap)
-  local size = wx.wxSize(16, 16)
-  filetree.imglist = wx.wxImageList(16,16)
-  filetree.imglist:Add(getBitmap("FOLDER", "OTHER", size)) -- 0 = directory
-  filetree.imglist:Add(getBitmap("HELP-PAGE", "OTHER", size)) -- 1 = file known spec
-  filetree.imglist:Add(getBitmap("NORMAL-FILE", "OTHER", size)) -- 2 = file other
-end
 
 local function treeAddDir(tree,parent_id,rootdir)
   local items = {}
@@ -148,7 +138,7 @@ local function treeSetConnectorsAndIcons(tree)
   function tree:IsRoot(item_id) return not tree:GetItemParent(item_id):IsOk() end
 
   function tree:FindItem(match)
-    return findItem(self, wx.wxIsAbsolutePath(match) and match
+    return findItem(self, (wx.wxIsAbsolutePath(match) or match == '') and match
       or MergeFullPath(ide:GetProject(), match))
   end
 
@@ -251,7 +241,9 @@ local function treeSetConnectorsAndIcons(tree)
         doc.filePath = nil -- remove path to avoid "file no longer exists" message
         -- when moving folders, /foo/bar/file.lua can be replaced with
         -- /foo/baz/bar/file.lua, so change /foo/bar to /foo/baz/bar
-        LoadFile(fullpath:gsub(q(source), target), doc.editor)
+        local path = (not iscaseinsensitive and fullpath:gsub(q(source), target)
+          or fullpath:lower():gsub(q(source:lower()), target))
+        LoadFile(path, doc.editor)
       end
     else -- refresh the tree and select the new item
       local itemdst = tree:FindItem(target)
@@ -509,7 +501,7 @@ projtree:SetFont(ide.font.fNormal)
 filetree.projtree = projtree
 
 local projnotebook = ide.frame.projnotebook
-projnotebook:AddPage(projtree, "Project", true)
+projnotebook:AddPage(projtree, TR("Project"), true)
 
 -- proj connectors
 -- ---------------

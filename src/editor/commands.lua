@@ -214,18 +214,10 @@ function ActivateFile(filename)
 end
 
 local function getExtsString()
-  local knownexts = ""
-  for _,spec in pairs(ide.specs) do
-    if (spec.exts) then
-      for _,ext in ipairs(spec.exts) do
-        knownexts = knownexts.."*."..ext..";"
-      end
-    end
-  end
-  knownexts = knownexts:len() > 0 and knownexts:sub(1,-2) or nil
-
-  local exts = knownexts and TR("Known Files").." ("..knownexts..")|"..knownexts.."|" or ""
-  return exts..TR("All files").." (*)|*"
+  local exts = ide:GetKnownExtensions()
+  local knownexts = #exts > 0 and "*."..table.concat(exts, ";*.") or nil
+  return (knownexts and TR("Known Files").." ("..knownexts..")|"..knownexts.."|" or "")
+  .. TR("All files").." (*)|*"
 end
 
 function ReportError(msg)
@@ -343,6 +335,7 @@ function SaveFileAs(editor)
         editor:ClearDocumentStyle() -- remove styles from the document
         editor:SetupKeywords(GetFileExt(filePath))
         IndicateAll(editor)
+        IndicateFunctionsOnly(editor)
         MarkupStyle(editor)
       end
       saved = true
@@ -937,7 +930,8 @@ local function closeWindow(event)
   frame.uimgr:UnInit()
   frame:Hide() -- hide the main frame while the IDE exits
 
-  if ide.session.timer then ide.session.timer:Stop() end
+  -- stop all the timers
+  for _, timer in pairs(ide.timers) do timer:Stop() end
 
   event:Skip()
 end
@@ -955,7 +949,6 @@ frame:Connect(wx.wxEVT_TIMER, function() saveAutoRecovery() end)
 -- tickets: http://trac.wxwidgets.org/ticket/14142
 -- and http://trac.wxwidgets.org/ticket/14269)
 
-local infocus
 ide.editorApp:Connect(wx.wxEVT_SET_FOCUS, function(event)
   if ide.exitingProgram then return end
 
@@ -963,8 +956,8 @@ ide.editorApp:Connect(wx.wxEVT_SET_FOCUS, function(event)
   if win then
     local class = win:GetClassInfo():GetClassName()
     -- don't set focus on the main frame or toolbar
-    if infocus and (class == 'wxAuiToolBar' or class == 'wxFrame') then
-      pcall(function() infocus:SetFocus() end)
+    if ide.infocus and (class == 'wxAuiToolBar' or class == 'wxFrame') then
+      pcall(function() ide.infocus:SetFocus() end)
       return
     end
 
@@ -984,14 +977,14 @@ ide.editorApp:Connect(wx.wxEVT_SET_FOCUS, function(event)
       parent = parent:GetParent()
     end
     if mainwin then
-      if infocus and infocus ~= win and ide.osname == 'Macintosh' then
+      if ide.infocus and ide.infocus ~= win and ide.osname == 'Macintosh' then
         -- kill focus on the control that had the focus as wxwidgets on OSX
         -- doesn't do it: http://trac.wxwidgets.org/ticket/14142;
         -- wrap into pcall in case the window is already deleted
         local ev = wx.wxFocusEvent(wx.wxEVT_KILL_FOCUS)
-        pcall(function() infocus:GetEventHandler():ProcessEvent(ev) end)
+        pcall(function() ide.infocus:GetEventHandler():ProcessEvent(ev) end)
       end
-      infocus = win
+      ide.infocus = win
     end
   end
 
@@ -1001,11 +994,11 @@ end)
 ide.editorApp:Connect(wx.wxEVT_ACTIVATE_APP,
   function(event)
     if not ide.exitingProgram then
-      if ide.osname == 'Macintosh' and infocus and event:GetActive() then
+      if ide.osname == 'Macintosh' and ide.infocus and event:GetActive() then
         -- restore focus to the last element that received it;
         -- wrap into pcall in case the element has disappeared
         -- while the application was out of focus
-        pcall(function() infocus:SetFocus() end)
+        pcall(function() ide.infocus:SetFocus() end)
       end
 
       -- save auto-recovery record when making the app inactive
@@ -1018,9 +1011,9 @@ ide.editorApp:Connect(wx.wxEVT_ACTIVATE_APP,
   end)
 
 if ide.config.autorecoverinactivity then
-  ide.session.timer = wx.wxTimer(frame)
+  ide.timers.session = wx.wxTimer(frame)
   -- check at least 5s to be never more than 5s off
-  ide.session.timer:Start(math.min(5, ide.config.autorecoverinactivity)*1000)
+  ide.timers.session:Start(math.min(5, ide.config.autorecoverinactivity)*1000)
 end
 
 function PaneFloatToggle(window)

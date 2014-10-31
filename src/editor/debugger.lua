@@ -23,19 +23,9 @@ debugger.hostname = ide.config.debugger.hostname or (function()
   local hostname = socket.dns.gethostname()
   return hostname and socket.dns.toip(hostname) and hostname or "localhost"
 end)()
+debugger.imglist = ide:CreateImageList("STACK", "VALUE-CALL", "VALUE-LOCAL", "VALUE-UP")
 
 local image = { STACK = 0, LOCAL = 1, UPVALUE = 2 }
-
-do
-  local getBitmap = (ide.app.createbitmap or wx.wxArtProvider.GetBitmap)
-  local size = wx.wxSize(16,16)
-  local imglist = wx.wxImageList(16,16)
-  imglist:Add(getBitmap("GO-FORWARD", "OTHER", size)) -- 0 = stack call
-  imglist:Add(getBitmap("LIST-VIEW", "OTHER", size)) -- 1 = local variables
-  imglist:Add(getBitmap("REPORT-VIEW", "OTHER", size)) -- 2 = upvalues
-  debugger.imglist = imglist
-end
-
 local notebook = ide.frame.notebook
 
 local CURRENT_LINE_MARKER = StylesGetMarker("currentline")
@@ -251,7 +241,7 @@ local function debuggerToggleViews(show)
 end
 
 local function killClient()
-  if (debugger.pid) then
+  if (debugger.pid and wx.wxProcess.Exists(debugger.pid)) then
     -- using SIGTERM for some reason kills not only the debugee process,
     -- but also some system processes, which leads to a blue screen crash
     -- (at least on Windows Vista SP2)
@@ -262,8 +252,8 @@ local function killClient()
       DisplayOutputLn(TR("Unable to stop program (pid: %d), code %d.")
         :format(debugger.pid, ret))
     end
-    debugger.pid = nil
   end
+  debugger.pid = nil
 end
 
 local function activateDocument(file, line, activatehow)
@@ -527,8 +517,11 @@ debugger.listen = function(start)
   end
   DisplayOutputLn(TR("Debugger server started at %s:%d.")
     :format(debugger.hostname, debugger.portnumber))
+
   copas.autoclose = false
   copas.addserver(server, function (skt)
+      -- pull any pending data not processed yet
+      if debugger.running then debugger.update() end
       if debugger.server then
         DisplayOutputLn(TR("Refused a request to start a new debugging session as there is one in progress already."))
         return
@@ -721,7 +714,7 @@ end
 local function nameOutputTab(name)
   local nbk = ide.frame.bottomnotebook
   local index = nbk:GetPageIndex(ide:GetOutput())
-  if index then nbk:SetPageText(index, name) end
+  if index ~= -1 then nbk:SetPageText(index, name) end
 end
 
 debugger.handle = function(command, server, options)
@@ -939,14 +932,6 @@ debugger.quickeval = function(var, callback)
   end
 end
 
-function DebuggerAddStackWindow()
-  return ide:AddPanel(debugger.stackCtrl, "stackpanel", TR("Stack"))
-end
-
-function DebuggerAddWatchWindow()
-  return ide:AddPanel(debugger.watchCtrl, "watchpanel", TR("Watch"))
-end
-
 local width, height = 360, 200
 
 local keyword = {}
@@ -1030,10 +1015,10 @@ local function debuggerCreateStackWindow()
 
   local layout = ide:GetSetting("/view", "uimgrlayout")
   if layout and not layout:find("stackpanel") then
-    ide.frame.bottomnotebook:AddPage(stackCtrl, TR("Stack"), true)
-    return
+    ide:AddPanelDocked(ide.frame.bottomnotebook, stackCtrl, "stackpanel", TR("Stack"))
+  else
+    ide:AddPanel(stackCtrl, "stackpanel", TR("Stack"))
   end
-  DebuggerAddStackWindow()
 end
 
 local function debuggerCreateWatchWindow()
@@ -1230,10 +1215,10 @@ local function debuggerCreateWatchWindow()
 
   local layout = ide:GetSetting("/view", "uimgrlayout")
   if layout and not layout:find("watchpanel") then
-    ide.frame.bottomnotebook:AddPage(watchCtrl, TR("Watch"), true)
-    return
+    ide:AddPanelDocked(ide.frame.bottomnotebook, watchCtrl, "watchpanel", TR("Watch"))
+  else
+    ide:AddPanel(watchCtrl, "watchpanel", TR("Watch"))
   end
-  DebuggerAddWatchWindow()
 end
 
 debuggerCreateStackWindow()
@@ -1265,6 +1250,7 @@ function DebuggerStop(resetpid)
     debuggerToggleViews(false)
     local lines = TR("traced %d instruction", debugger.stats.line):format(debugger.stats.line)
     DisplayOutputLn(TR("Debugging session completed (%s)."):format(lines))
+    nameOutputTab(debugger.pid and TR("Output (running)") or TR("Output"))
   else
     -- it's possible that the application couldn't start, or that the
     -- debugger in the application didn't start, which means there is
