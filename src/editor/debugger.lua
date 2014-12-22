@@ -37,9 +37,9 @@ local activate = {CHECKONLY = 1, NOREPORT = 2}
 
 local function serialize(value, options) return mobdebug.line(value, options) end
 
-local stackmaxlength = ide.config.debugger.stackmaxlength or 400
-local stackmaxnum = ide.config.debugger.stackmaxnum or 400
-local stackmaxlevel = ide.config.debugger.stackmaxlevel or 3
+local stackmaxlength = ide.config.debugger.maxdatalength
+local stackmaxnum = ide.config.debugger.maxdatanum
+local stackmaxlevel = ide.config.debugger.maxdatalevel
 local params = {comment = false, nocode = true, maxlevel = stackmaxlevel, maxnum = stackmaxnum}
 
 local function fixUTF8(...)
@@ -86,7 +86,7 @@ local function updateWatchesSync(onlyitem)
           watchCtrl:SetItemValueIfExpandable(item, nil)
         else
           if #values == 0 then values = {'nil'} end
-          local ok, res = LoadSafe("return "..values[1])
+          local _, res = LoadSafe("return "..values[1])
           watchCtrl:SetItemValueIfExpandable(item, res)
         end
 
@@ -432,7 +432,7 @@ debugger.shell = function(expression, isstatement)
           if #values == 0 and (forceexpression or not isstatement) then
             values = {'nil'}
           end
-          DisplayShell(fixUTF8(unpack(values)))
+          DisplayShell(unpack(values))
         end
 
         -- refresh Stack and Watch windows if executed a statement (and no err)
@@ -951,7 +951,8 @@ end
 local function debuggerCreateStackWindow()
   local stackCtrl = wx.wxTreeCtrl(ide.frame, wx.wxID_ANY,
     wx.wxDefaultPosition, wx.wxSize(width, height),
-    wx.wxTR_LINES_AT_ROOT + wx.wxTR_HAS_BUTTONS + wx.wxTR_SINGLE + wx.wxTR_HIDE_ROOT)
+    wx.wxTR_LINES_AT_ROOT + wx.wxTR_HAS_BUTTONS + wx.wxTR_SINGLE
+    + wx.wxTR_HIDE_ROOT + wx.wxNO_BORDER)
 
   debugger.stackCtrl = stackCtrl
 
@@ -1025,7 +1026,7 @@ local function debuggerCreateWatchWindow()
   local watchCtrl = wx.wxTreeCtrl(ide.frame, wx.wxID_ANY,
     wx.wxDefaultPosition, wx.wxSize(width, height),
     wx.wxTR_LINES_AT_ROOT + wx.wxTR_HAS_BUTTONS + wx.wxTR_SINGLE
-    + wx.wxTR_HIDE_ROOT + wx.wxTR_EDIT_LABELS)
+    + wx.wxTR_HIDE_ROOT + wx.wxTR_EDIT_LABELS + wx.wxNO_BORDER)
 
   debugger.watchCtrl = watchCtrl
 
@@ -1302,7 +1303,7 @@ function DebuggerRefreshScratchpad()
         debugger.scratchpad.running = now
       end
     else
-      local clear = ide.frame.menuBar:IsChecked(ID_CLEAROUTPUT)
+      local clear = ide:GetMenuBar():IsChecked(ID_CLEAROUTPUT)
       local filePath = debuggerMakeFileName(scratchpadEditor)
 
       -- wrap into a function call to make "return" to work with scratchpad
@@ -1321,7 +1322,7 @@ function DebuggerRefreshScratchpad()
         debugger.scratchpad.updated = false
         debugger.scratchpad.runs = (debugger.scratchpad.runs or 0) + 1
 
-        if clear then ClearOutput() end
+        if clear then ClearOutput(true) end
 
         -- the code can be running in two ways under scratchpad:
         -- 1. controlled by the application, requires stopper (most apps)

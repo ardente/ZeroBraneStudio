@@ -4,6 +4,16 @@
 ---------------------------------------------------------
 
 local ide = ide
+local layoutlabel = {
+  UIMANAGER = "uimgrlayout",
+  NOTEBOOK = "nblayout",
+  NOTEBOOKOUTPUT = "nbbtmlayout",
+  NOTEBOOKPROJECT = "nbprojlayout",
+  DOCKNOTEBOOK = "nbdocklayout",
+  DOCKNOTEBOOKOUTPUT = "nbbtmdocklayout",
+  DOCKNOTEBOOKPROJECT = "nbprojdocklayout",
+  STATUSBAR = "statusbar",
+}
 
 -- ----------------------------------------------------------------------------
 -- Initialize the wxConfig for loading/saving the preferences
@@ -281,7 +291,7 @@ local function saveNotebook(nb)
   
   local function sortedPages(tab)
     local t = {}
-    for i,v in pairs(tab) do
+    for i in pairs(tab) do
       table.insert(t,i)
     end
     table.sort(t)
@@ -309,9 +319,9 @@ local function saveNotebook(nb)
     split = "<Y>"
   end
   
-  for i,v in ipairs(sortedUse) do
+  for _, v in ipairs(sortedUse) do
     local pages = pagesUse[v]
-    for n,id in ipairs(pages) do
+    for _, id in ipairs(pages) do
       str = str..id.."|"
     end
     str = str..split.."|"
@@ -390,7 +400,7 @@ function SettingsRestoreView()
   local uimgr = frame.uimgr
   
   local layoutcur = uimgr:SavePerspective()
-  local layout = settingsReadSafe(settings,"uimgrlayout",layoutcur)
+  local layout = settingsReadSafe(settings,layoutlabel.UIMANAGER,layoutcur)
   if (layout ~= layoutcur) then
     -- save the current toolbar besth and re-apply after perspective is loaded
     -- bestw and besth has two separate issues:
@@ -424,26 +434,32 @@ function SettingsRestoreView()
     end
   end
 
-  frame:GetStatusBar():Show(settingsReadSafe(settings,"statusbar",true))
+  frame:GetStatusBar():Show(settingsReadSafe(settings,layoutlabel.STATUSBAR,true))
 
   uimgr:Update()
   
-  local layoutcur = saveNotebook(frame.bottomnotebook)
-  local layout = settingsReadSafe(settings,"nbbtmlayout",layoutcur)
+  layoutcur = saveNotebook(ide:GetOutputNotebook())
+  layout = settingsReadSafe(settings,layoutlabel.NOTEBOOKOUTPUT,layoutcur)
   if (layout ~= layoutcur) then
-    loadNotebook(ide.frame.bottomnotebook,layout,
+    loadNotebook(ide:GetOutputNotebook(),layout,
       -- treat "Output (running)" same as "Output"
       function(name) return
         name:match(TR("Output")) or name:match("Output") or name end)
   end
 
+  layoutcur = saveNotebook(ide:GetProjectNotebook())
+  layout = settingsReadSafe(settings,layoutlabel.NOTEBOOKPROJECT,layoutcur)
+  if (layout ~= layoutcur) then
+    loadNotebook(ide:GetProjectNotebook(),layout)
+  end
+
   -- always select Output tab
-  local bottomnotebook = frame.bottomnotebook
+  local bottomnotebook = ide:GetOutputNotebook()
   local index = bottomnotebook:GetPageIndex(bottomnotebook.errorlog)
   if index >= 0 then bottomnotebook:SetSelection(index) end
 
-  local layoutcur = saveNotebook(frame.notebook)
-  local layout = settingsReadSafe(settings,"nblayout",layoutcur)
+  layoutcur = saveNotebook(frame.notebook)
+  layout = settingsReadSafe(settings,layoutlabel.NOTEBOOK,layoutcur)
   if (layout ~= layoutcur) then
     loadNotebook(ide.frame.notebook,layout)
     local openDocuments = ide.openDocuments
@@ -457,10 +473,10 @@ function SettingsRestoreView()
   -- restore configuration for notebook pages that have been split;
   -- load saved dock_size values and update current values with saved ones
   -- where dock_size configuration matches
-  local docksizemask = '(dock_size[^=]+=)(%d+)'
   for l, m in pairs({
-    nbdocklayout = frame.notebook:GetAuiManager(),
-    nbbtmdocklayout = frame.bottomnotebook:GetAuiManager(),
+    [layoutlabel.DOCKNOTEBOOK] = ide:GetEditorNotebook():GetAuiManager(),
+    [layoutlabel.DOCKNOTEBOOKOUTPUT] = ide:GetOutputNotebook():GetAuiManager(),
+    [layoutlabel.DOCKNOTEBOOKPROJECT] = ide:GetProjectNotebook():GetAuiManager(),
   }) do
     -- ...|dock_size(5,0,0)=20|dock_size(2,1,0)=200|...
     local prevlayout = settingsReadSafe(settings, l, "")
@@ -469,7 +485,7 @@ function SettingsRestoreView()
         local val = prevlayout:match(EscapeMagic(t)..'(%d+)')
         return t..(val or v)
       end)
-    if newlayout ~= curlayour then m:LoadPerspective(newlayout) end
+    if newlayout ~= curlayout then m:LoadPerspective(newlayout) end
   end
 
   local editor = GetEditor()
@@ -487,12 +503,14 @@ function SettingsSaveView()
   local frame = ide.frame
   local uimgr = frame.uimgr
   
-  settings:Write("uimgrlayout", uimgr:SavePerspective())
-  settings:Write("nblayout", saveNotebook(frame.notebook))
-  settings:Write("nbbtmlayout", saveNotebook(frame.bottomnotebook))
-  settings:Write("statusbar", frame:GetStatusBar():IsShown())
-  settings:Write("nbdocklayout", frame.notebook:GetAuiManager():SavePerspective())
-  settings:Write("nbbtmdocklayout", frame.bottomnotebook:GetAuiManager():SavePerspective())
+  settings:Write(layoutlabel.UIMANAGER, uimgr:SavePerspective())
+  settings:Write(layoutlabel.NOTEBOOK, saveNotebook(ide:GetEditorNotebook()))
+  settings:Write(layoutlabel.NOTEBOOKOUTPUT, saveNotebook(ide:GetOutputNotebook()))
+  settings:Write(layoutlabel.NOTEBOOKPROJECT, saveNotebook(ide:GetProjectNotebook()))
+  settings:Write(layoutlabel.DOCKNOTEBOOK, ide:GetEditorNotebook():GetAuiManager():SavePerspective())
+  settings:Write(layoutlabel.DOCKNOTEBOOKOUTPUT, ide:GetOutputNotebook():GetAuiManager():SavePerspective())
+  settings:Write(layoutlabel.DOCKNOTEBOOKPROJECT, ide:GetProjectNotebook():GetAuiManager():SavePerspective())
+  settings:Write(layoutlabel.STATUSBAR, frame:GetStatusBar():IsShown())
 
   settings:SetPath(path)
 end
@@ -504,6 +522,8 @@ function SettingsRestoreEditorSettings()
 
   ide.config.interpreter = settingsReadSafe(settings,"interpreter",ide.config.interpreter)
   ProjectSetInterpreter(ide.config.interpreter)
+
+  settings:SetPath(path)
 end
 
 function SettingsSaveEditorSettings()

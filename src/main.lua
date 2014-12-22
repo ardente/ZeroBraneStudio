@@ -12,7 +12,9 @@ local unpack = table.unpack or unpack
 if islinux then
   local file = io.popen("uname -m")
   if file then
-    arch = file:read("*a"):find("x86_64") and "x64" or "x86"
+    local machine=file:read("*l")
+    local archtype= { x86_64="x64", armv7l="armhf" }
+    arch = archtype[machine] or "x86"
     file:close()
   end
 end
@@ -54,6 +56,7 @@ ide = {
       fold = true,
       autoreload = true,
       indentguide = true,
+      backspaceunindent = true,
     },
     debugger = {
       verbose = false,
@@ -61,6 +64,9 @@ ide = {
       port = nil,
       runonstart = nil,
       redirect = nil,
+      maxdatalength = 400,
+      maxdatanum = 400,
+      maxdatalevel = 3,
     },
     default = {
       name = 'untitled',
@@ -75,6 +81,10 @@ ide = {
     },
     outline = {
       showanonymous = '~',
+      showflat = false,
+      showmethodindicator = false,
+      showonefile = false,
+      sort = false,
     },
 
     toolbar = {
@@ -215,7 +225,7 @@ end
 
 dofile "src/version.lua"
 
-for _, file in ipairs({"ids", "style", "keymap", "proto", "toolbar"}) do
+for _, file in ipairs({"proto", "ids", "style", "keymap", "toolbar"}) do
   dofile("src/editor/"..file..".lua")
 end
 
@@ -252,7 +262,8 @@ local function setLuaPaths(mainpath, osname)
   wx.wxSetEnv("LUA_PATH",
     (os.getenv("LUA_PATH") or ';') .. ';'
     .. "./?.lua;./?/init.lua;./lua/?.lua;./lua/?/init.lua" .. ';'
-    .. mainpath.."lualibs/?/?.lua;"..mainpath.."lualibs/?.lua"
+    .. mainpath.."lualibs/?/?.lua;"..mainpath.."lualibs/?.lua;"
+    .. mainpath.."lualibs/?/?/init.lua;"..mainpath.."lualibs/?/init.lua"
     .. (luadev_path and (';' .. luadev_path) or ''))
 
   ide.osclibs = -- keep the list to use for other Lua versions
@@ -427,7 +438,7 @@ end
 -- process config
 
 -- set ide.config environment
-setmetatable(ide.config, {__index = {os = os, wxstc = wxstc, wx = wx}})
+setmetatable(ide.config, {__index = {os = os, wxstc = wxstc, wx = wx, ID = ID}})
 ide.config.load = { interpreters = loadInterpreters, specs = loadSpecs,
   tools = loadTools }
 do
@@ -480,8 +491,17 @@ do
 
   -- process all other configs (if any)
   for _, v in ipairs(configs) do LoadLuaConfig(v, true) end
-
   configs = nil
+
+  -- check and apply default styles in case a user resets styles in the config
+  for _, styles in ipairs({"styles", "stylesoutshell"}) do
+    if not ide.config[styles] then
+      print(("Ignored incorrect value of '%s' setting in the configuration file")
+        :format(styles))
+      ide.config[styles] = StylesGetDefault()
+    end
+  end
+
   local sep = GetPathSeparator()
   if ide.config.language then
     LoadLuaFileExt(ide.config.messages, "cfg"..sep.."i18n"..sep..ide.config.language..".lua")
@@ -494,8 +514,8 @@ loadPackages()
 -- Load App
 
 for _, file in ipairs({
-    "markup", "settings", "singleinstance", "iofilters",
-    "package", "gui", "filetree", "output", "debugger", "outline",
+    "markup", "settings", "singleinstance", "iofilters", "package",
+    "gui", "filetree", "output", "debugger", "outline", "commandbar",
     "editor", "findreplace", "commands", "autocomplete", "shellbox",
     "menu_file", "menu_edit", "menu_search",
     "menu_view", "menu_project", "menu_tools", "menu_help",

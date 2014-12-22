@@ -92,10 +92,14 @@ function ide:GetMainFrame() return self.frame end
 function ide:GetUIManager() return self.frame.uimgr end
 function ide:GetDocument(ed) return self.openDocuments[ed:GetId()] end
 function ide:GetDocuments() return self.openDocuments end
-function ide:GetKnownExtensions()
-  local knownexts = {}
+function ide:GetKnownExtensions(ext)
+  local knownexts, extmatch = {}, ext and ext:lower()
   for _, spec in pairs(ide.specs) do
-    for _, ext in ipairs(spec.exts or {}) do table.insert(knownexts, ext) end
+    for _, ext in ipairs(spec.exts or {}) do
+      if not extmatch or extmatch == ext:lower() then
+        table.insert(knownexts, ext)
+      end
+    end
   end
   return knownexts
 end
@@ -150,12 +154,16 @@ function ide:GetConfig() return self.config end
 function ide:GetOutput() return self.frame.bottomnotebook.errorlog end
 function ide:GetConsole() return self.frame.bottomnotebook.shellbox end
 function ide:GetEditorNotebook() return self.frame.notebook end
+function ide:GetOutputNotebook() return self.frame.bottomnotebook end
+function ide:GetProjectNotebook() return self.frame.projnotebook end
 function ide:GetProject() return FileTreeGetDir() end
 function ide:GetLaunchedProcess() return self.debugger and self.debugger.pid end
-function ide:GetProjectTree() return ide.filetree.projtree end
+function ide:GetProjectTree() return ide.filetree.projtreeCtrl end
+function ide:GetOutlineTree() return ide.outline.outlineCtrl end
 function ide:GetWatch() return self.debugger and self.debugger.watchCtrl end
 function ide:GetStack() return self.debugger and self.debugger.stackCtrl end
 function ide:Yield() wx.wxYield() end
+function ide:CreateBareEditor() return CreateEditor(true) end
 
 function ide:GetSetting(path, setting)
   local settings = self.settings
@@ -246,6 +254,13 @@ function ide:GetBitmap(id, client, size)
   return icon, file
 end
 
+function ide:AddPackage(name, package)
+  ide.packages[name] = setmetatable(package, ide.proto.Plugin)
+  ide.packages[name].fname = name
+  return ide.packages[name]
+end
+function ide:RemovePackage(name) ide.packages[name] = nil end
+
 function ide:AddWatch(watch, value)
   local mgr = ide.frame.uimgr
   local pane = mgr:GetPane("watchpanel")
@@ -270,7 +285,7 @@ function ide:AddWatch(watch, value)
     item = watchCtrl:GetNextSibling(item)
   end
 
-  local item = watchCtrl:AppendItem(root, watch, 1)
+  item = watchCtrl:AppendItem(root, watch, 1)
   watchCtrl:SetItemExpression(item, watch, value)
   return item
 end
@@ -332,6 +347,8 @@ function ide:AddPanel(ctrl, panel, name, conf)
   notebook:AddPage(ctrl, name, true)
   notebook:Connect(wxaui.wxEVT_COMMAND_AUINOTEBOOK_BG_DCLICK,
     function() PaneFloatToggle(notebook) end)
+  notebook:Connect(wxaui.wxEVT_COMMAND_AUINOTEBOOK_PAGE_CLOSE,
+    function(event) event:Veto() end)
 
   local mgr = ide.frame.uimgr
   mgr:AddPane(notebook, wxaui.wxAuiPaneInfo():
@@ -350,6 +367,10 @@ function ide:AddPanelDocked(notebook, ctrl, panel, name, conf, activate)
   notebook:AddPage(ctrl, name, activate ~= false)
   panels[name] = {ctrl, panel, name, conf}
   return notebook
+end
+function ide:IsPanelDocked(panel)
+  local layout = ide:GetSetting("/view", "uimgrlayout")
+  return layout and not layout:find(panel)
 end
 
 function ide:RestorePanelByLabel(name)

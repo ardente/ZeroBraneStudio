@@ -137,19 +137,13 @@ function GetFileModTime(filePath)
 end
 
 function GetFileExt(filePath)
-  local match = filePath and filePath:match("%.([a-zA-Z_0-9]+)$")
-  return match and (string.lower(match))
+  local match = filePath and filePath:match("%.([^./\\]*)$")
+  return match and match:lower() or ''
 end
 
 function IsLuaFile(filePath)
   return filePath and (string.len(filePath) > 4) and
   (string.lower(string.sub(filePath, -4)) == ".lua")
-end
-
-function GetFileNameExt(filePath)
-  if (not filePath) then return end
-  local wxn = wx.wxFileName(filePath)
-  return (wxn:GetName()..(wxn:HasExt() and ("."..wxn:GetExt()) or ""))
 end
 
 function GetPathWithSep(wxfn)
@@ -175,7 +169,7 @@ function FileSysGetRecursive(path, recursive, spec, skip)
     local dir = wx.wxDir(path)
     if not dir:IsOpened() then return end
 
-    local log = wx.wxLogNull() -- disable error reporting; will report as needed
+    local _ = wx.wxLogNull() -- disable error reporting; will report as needed
     local found, file = dir:GetFirst("*", wx.wxDIR_DIRS)
     while found do
       if not skip or not file:find(skip) then
@@ -185,11 +179,12 @@ function FileSysGetRecursive(path, recursive, spec, skip)
         -- Skip the processing if it does as it could lead to infinite
         -- recursion with circular references created by symlinks.
         if recursive and select(2, fname:gsub(EscapeMagic(file..sep),'')) <= 2 then
-          getDir(fname, spec) end
+          getDir(fname, spec)
+        end
       end
       found, file = dir:GetNext()
     end
-    local found, file = dir:GetFirst(spec, wx.wxDIR_FILES)
+    found, file = dir:GetFirst(spec, wx.wxDIR_FILES)
     while found do
       if not skip or not file:find(skip) then
         local fname = wx.wxFileName(path, file):GetFullPath()
@@ -233,7 +228,7 @@ function MergeFullPath(p, f)
 end
 
 function FileWrite(file, content)
-  local log = wx.wxLogNull() -- disable error reporting; will report as needed
+  local _ = wx.wxLogNull() -- disable error reporting; will report as needed
 
   if not wx.wxFileExists(file)
   and not wx.wxFileName(file):Mkdir(tonumber(755,8), wx.wxPATH_MKDIR_FULL) then
@@ -248,26 +243,26 @@ function FileWrite(file, content)
   return true
 end
 
-function FileRead(file)
+function FileRead(file, length)
   -- on OSX "Open" dialog allows to open applications, which are folders
   if wx.wxDirExists(file) then return nil, "Can't read directory as file." end
 
-  local log = wx.wxLogNull() -- disable error reporting; will report as needed
+  local _ = wx.wxLogNull() -- disable error reporting; will report as needed
   local file = wx.wxFile(file, wx.wxFile.read)
   if not file:IsOpened() then return nil, wx.wxSysErrorMsg() end
 
-  local _, content = file:Read(file:Length())
+  local _, content = file:Read(length or file:Length())
   file:Close()
   return content, wx.wxSysErrorMsg()
 end
 
 function FileRename(file1, file2)
-  local log = wx.wxLogNull() -- disable error reporting; will report as needed
+  local _ = wx.wxLogNull() -- disable error reporting; will report as needed
   return wx.wxRenameFile(file1, file2), wx.wxSysErrorMsg()
 end
 
 function FileCopy(file1, file2)
-  local log = wx.wxLogNull() -- disable error reporting; will report as needed
+  local _ = wx.wxLogNull() -- disable error reporting; will report as needed
   return wx.wxCopyFile(file1, file2), wx.wxSysErrorMsg()
 end
 

@@ -462,7 +462,6 @@ local function getAutoCompApiList(childs,fragment,method)
       ((method and v.type ~= "value")
         or (not method and v.type ~= "method"))) then
       local used = {}
-      --
       local kl = key:lower()
       for i=0,#key do
         local k = kl:sub(1,i)
@@ -492,7 +491,6 @@ local function getAutoCompApiList(childs,fragment,method)
   return t
 end
 
--- make syntype dependent
 function CreateAutoCompList(editor,key,pos)
   local api = editor.api
   local tip = api.tip
@@ -578,7 +576,7 @@ function CreateAutoCompList(editor,key,pos)
     local vars, context = {}
     local tokens = editor:GetTokenList()
     for _, token in ipairs(tokens) do
-      if token.fpos > pos then break end
+      if token.fpos and token.fpos > pos then break end
       if token[1] == 'Id' or token[1] == 'Var' then
         local var = token.name
         if var ~= key and var:find(key, 1, true) == 1 then

@@ -11,6 +11,7 @@ local notebook = ide.frame.notebook
 local edcfg = ide.config.editor
 local styles = ide.config.styles
 local unpack = table.unpack or unpack
+local q = EscapeMagic
 
 local margin = { LINENUMBER = 0, MARKER = 1, FOLD = 2 }
 local linenummask = "99999"
@@ -40,8 +41,6 @@ local function updateStatusText(editor)
   local texts = { "", "", "" }
   if ide.frame and editor then
     local pos = editor:GetCurrentPos()
-    local line = editor:LineFromPosition(pos)
-    local col = 1 + pos - editor:PositionFromLine(line)
     local selected = #editor:GetSelectedText()
     local selections = ide.wxver >= "2.9.5" and editor:GetSelections() or 1
 
@@ -49,8 +48,8 @@ local function updateStatusText(editor)
       iff(editor:GetOvertype(), TR("OVR"), TR("INS")),
       iff(editor:GetReadOnly(), TR("R/O"), TR("R/W")),
       table.concat({
-        TR("Ln: %d"):format(line + 1),
-        TR("Col: %d"):format(col),
+        TR("Ln: %d"):format(editor:LineFromPosition(pos) + 1),
+        TR("Col: %d"):format(editor:GetColumn(pos) + 1),
         selected > 0 and TR("Sel: %d/%d"):format(selected, selections) or "",
       }, ' ')}
   end
@@ -242,8 +241,8 @@ function EditorAutoComplete(editor)
   lt = lt:gsub("%b()","")
   lt = lt:gsub("%b{}","")
   lt = lt:gsub("%b[]",".0")
-  -- match from starting brace
-  lt = lt:match("[^%[%(%{%s,]*$")
+  -- remove everything that can't be auto-completed
+  lt = lt:match("[%w_"..q(editor.spec.sep).."]*$")
 
   -- know now which string is to be completed
   local userList = CreateAutoCompList(editor, lt, pos)
@@ -378,7 +377,7 @@ function EditorCallTip(editor, pos, x, y)
   -- don't activate if the window itself is not active (in the background)
   if not ide.frame:IsActive() then return end
 
-  local var, funccall = getValAtPosition(editor, pos)
+  local var, funccall = editor:ValueFromPosition(pos)
   -- if this is a value type rather than a function/method call, then use
   -- full match to avoid calltip about coroutine.status for "status" vars
   local tip = GetTipInfo(editor, funccall or var, false, not funccall)
@@ -660,7 +659,7 @@ end
 
 -- ----------------------------------------------------------------------------
 -- Create an editor
-function CreateEditor()
+function CreateEditor(bare)
   local editor = wxstc.wxStyledTextCtrl(notebook, editorID,
     wx.wxDefaultPosition, wx.wxSize(0, 0),
     wx.wxBORDER_NONE)
@@ -795,6 +794,9 @@ function CreateEditor()
   function editor:GetTokenList() return self.tokenlist end
   function editor:ResetTokenList() self.tokenlist = {}; return self.tokenlist end
 
+  function editor:SetupKeywords(...) return SetupKeywords(self, ...) end
+  function editor:ValueFromPosition(pos) return getValAtPosition(self, pos) end
+
   -- GotoPos should work by itself, but it doesn't (wx 2.9.5).
   -- This is likely because the editor window hasn't been refreshed yet,
   -- so its LinesOnScreen method returns 0/-1, which skews the calculations.
@@ -823,7 +825,7 @@ function CreateEditor()
     end
   end
 
-  function editor:SetupKeywords(...) return SetupKeywords(self, ...) end
+  if bare then return editor end -- bare editor doesn't have any event handlers
 
   editor.ev = {}
   editor:Connect(wxstc.wxEVT_STC_MARGINCLICK,
@@ -1060,7 +1062,11 @@ function CreateEditor()
       PackageEventHandle("onEditorPainted", editor, event)
 
       if ide.osname == 'Windows' then
-        updateStatusText(editor)
+        -- STC_PAINTED is called on multiple editors when they point to
+        -- the same document; only update status for the active one
+        if notebook:GetSelection() == notebook:GetPageIndex(editor) then
+          updateStatusText(editor)
+        end
 
         if edcfg.usewrap ~= true and editor:AutoCompActive() then
           -- showing auto-complete list leaves artifacts on the screen,
@@ -1072,8 +1078,24 @@ function CreateEditor()
       end
     end)
 
+  local alreadyProcessed = 0
   editor:Connect(wxstc.wxEVT_STC_UPDATEUI,
     function (event)
+      -- some of UPDATEUI events are triggered by blinking cursor, and since
+      -- there are no changes, the rest of the processing can be skipped;
+      -- the reason for `alreadyProcessed` is that it is not possible
+      -- to completely skip all of these updates as this causes the issue
+      -- of markup styling becoming visible after text deletion by Backspace.
+      -- to avoid this, we allow the first update after any updates caused
+      -- by real changes; the rest of UPDATEUI events are skipped.
+      if event:GetUpdated() == wxstc.wxSTC_UPDATE_CONTENT
+      and not next(editor.ev) then
+         if alreadyProcessed > 1 then return end
+      else
+         alreadyProcessed = 0
+      end
+      alreadyProcessed = alreadyProcessed + 1
+
       PackageEventHandle("onEditorUpdateUI", editor, event)
 
       if ide.osname ~= 'Windows' then updateStatusText(editor) end
@@ -1121,7 +1143,7 @@ function CreateEditor()
       and not event:ShiftDown() and not event:MetaDown() then
         local point = event:GetPosition()
         local pos = editor:PositionFromPointClose(point.x, point.y)
-        local value = pos ~= wxstc.wxSTC_INVALID_POSITION and getValAtPosition(editor, pos) or nil
+        local value = pos ~= wxstc.wxSTC_INVALID_POSITION and editor:ValueFromPosition(pos) or nil
         local instances = value and indicateFindInstances(editor, value, pos+1)
         if instances and instances[0] then
           navigateToPosition(editor, pos, instances[0]-1, #value)
@@ -1208,6 +1230,20 @@ function CreateEditor()
           -- auto-complete suggestions.
           local style = bit.band(editor:GetStyleAt(pos), 31)
           if not MarkupIsSpecial or not MarkupIsSpecial(style) then
+            -- if BACKSPACE is used at tab stop, with spaces for indentation,
+            -- and only whilespaces on the left, reduce indent
+            if edcfg.backspaceunindent and keycode == wx.WXK_BACK and not editor:GetUseTabs() then
+              -- get the line number from the *current* position of the cursor
+              local line = editor:LineFromPosition(pos+1)
+              local text = editor:GetLine(line):sub(1, pos-editor:PositionFromLine(line)+1)
+              local tw = editor:GetIndent()
+              -- if on the tab stop position and only white spaces on the left
+              if text:find('^%s+$') and #text % tw == 0 then
+                editor:SetLineIndentation(line, editor:GetLineIndentation(line) - tw)
+                editor:GotoPos(pos+1-tw)
+                return
+              end
+            end
             event:Skip()
             return
           end
@@ -1262,7 +1298,7 @@ function CreateEditor()
       -- only activate selection of instances on Ctrl/Cmd-DoubleClick
       if event:GetModifiers() == wx.wxMOD_CONTROL then
         local pos = event:GetPosition()
-        local value = pos ~= wxstc.wxSTC_INVALID_POSITION and getValAtPosition(editor, pos) or nil
+        local value = pos ~= wxstc.wxSTC_INVALID_POSITION and editor:ValueFromPosition(pos) or nil
         local instances = value and indicateFindInstances(editor, value, pos+1)
         if instances and (instances[0] or #instances > 0) then
           selectAllInstances(instances, value, pos)
@@ -1293,7 +1329,7 @@ function CreateEditor()
     function (event)
       local point = editor:ScreenToClient(event:GetPosition())
       pos = editor:PositionFromPointClose(point.x, point.y)
-      value = pos ~= wxstc.wxSTC_INVALID_POSITION and getValAtPosition(editor, pos) or nil
+      value = pos ~= wxstc.wxSTC_INVALID_POSITION and editor:ValueFromPosition(pos) or nil
       instances = value and indicateFindInstances(editor, value, pos+1)
 
       local occurrences = (not instances or #instances == 0) and ""
@@ -1494,6 +1530,12 @@ function SetupKeywords(editor, ext, forcespec, styles, font, fontitalic)
   -- cpp "greyed out" styles are  styleid + 64
   editor:SetProperty("lexer.cpp.track.preprocessor", "0")
   editor:SetProperty("lexer.cpp.update.preprocessor", "0")
+
+  -- create italic font if only main font is provided
+  if font and not fontitalic then
+    fontitalic = wx.wxFont(font)
+    fontitalic:SetStyle(wx.wxFONTSTYLE_ITALIC)
+  end
 
   StylesApplyToEditor(styles or ide.config.styles, editor,
     font or ide.font.eNormal,fontitalic or ide.font.eItalic,lexerstyleconvert)

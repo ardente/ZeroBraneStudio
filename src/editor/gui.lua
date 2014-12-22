@@ -38,7 +38,7 @@ local function createFrame()
   frame:Connect(wx.wxEVT_DROP_FILES,function(evt)
       local files = evt:GetFiles()
       if not files or #files == 0 then return end
-      for i,f in ipairs(files) do
+      for _, f in ipairs(files) do
         LoadFile(f,nil,true)
       end
     end)
@@ -415,9 +415,7 @@ local function createBottomNotebook(frame)
     end)
 
   errorlog:Connect(ID_CLEAROUTPUT, wx.wxEVT_COMMAND_MENU_SELECTED,
-    function(event)
-      ClearOutput()
-    end)
+    function(event) ClearOutput(true) end)
 
   local shellbox = wxstc.wxStyledTextCtrl(bottomnotebook, wx.wxID_ANY,
     wx.wxDefaultPosition, wx.wxDefaultSize, wx.wxBORDER_NONE)
