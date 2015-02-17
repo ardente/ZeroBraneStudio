@@ -208,17 +208,6 @@ function GetEditorFileAndCurInfo(nochecksave)
   return fn,info
 end
 
--- Set if the document is modified and update the notebook page text
-function SetDocumentModified(id, modified, text)
-  local modpref, doc = '* ', openDocuments[id]
-  if not doc then return end
-  local pageText = text or notebook:GetPageText(doc.index):gsub("^"..EscapeMagic(modpref), "")
-
-  if modified then pageText = modpref..pageText end
-  openDocuments[id].isModified = modified
-  notebook:SetPageText(doc.index, pageText)
-end
-
 function EditorAutoComplete(editor)
   if not (editor and editor.spec) then return end
 
@@ -660,9 +649,8 @@ end
 -- ----------------------------------------------------------------------------
 -- Create an editor
 function CreateEditor(bare)
-  local editor = wxstc.wxStyledTextCtrl(notebook, editorID,
-    wx.wxDefaultPosition, wx.wxSize(0, 0),
-    wx.wxBORDER_NONE)
+  local editor = ide:CreateStyledTextCtrl(notebook, editorID,
+    wx.wxDefaultPosition, wx.wxSize(0, 0), wx.wxBORDER_NONE)
 
   editorID = editorID + 1 -- increment so they're always unique
 
@@ -786,11 +774,6 @@ function CreateEditor(bare)
     editor:AutoCompStops([[ \n\t=-+():.,;*/!"'$%&~'#°^@?´`<>][|}{]])
   end
 
-  function editor:GotoPosEnforcePolicy(pos)
-    self:GotoPos(pos)
-    self:EnsureVisibleEnforcePolicy(self:LineFromPosition(pos))
-  end
-
   function editor:GetTokenList() return self.tokenlist end
   function editor:ResetTokenList() self.tokenlist = {}; return self.tokenlist end
 
@@ -870,6 +853,14 @@ function CreateEditor(bare)
         -- unfold the current line being changed if folded
         local firstLine = editor:LineFromPosition(event:GetPosition())
         if not editor:GetFoldExpanded(firstLine) then editor:ToggleFold(firstLine) end
+      end
+
+      -- hide calltip/auto-complete after undo/redo/delete
+      local undodelete = (wxstc.wxSTC_MOD_DELETETEXT
+        + wxstc.wxSTC_PERFORMED_UNDO + wxstc.wxSTC_PERFORMED_REDO)
+      if bit.band(evtype, undodelete) ~= 0 then
+        if editor:CallTipActive() then editor:CallTipCancel() end
+        if editor:AutoCompActive() then editor:AutoCompCancel() end
       end
       
       if ide.config.acandtip.nodynwords then return end
@@ -1043,12 +1034,14 @@ function CreateEditor(bare)
 
   editor:Connect(wxstc.wxEVT_STC_SAVEPOINTREACHED,
     function ()
-      SetDocumentModified(editor:GetId(), false)
+      local doc = ide:GetDocument(editor)
+      if doc then doc:SetModified(false) end
     end)
 
   editor:Connect(wxstc.wxEVT_STC_SAVEPOINTLEFT,
     function ()
-      SetDocumentModified(editor:GetId(), true)
+      local doc = ide:GetDocument(editor)
+      if doc then doc:SetModified(true) end
     end)
 
   -- "updateStatusText" should be called in UPDATEUI event, but it creates
@@ -1081,6 +1074,8 @@ function CreateEditor(bare)
   local alreadyProcessed = 0
   editor:Connect(wxstc.wxEVT_STC_UPDATEUI,
     function (event)
+      PackageEventHandle("onEditorUpdateUI", editor, event)
+
       -- some of UPDATEUI events are triggered by blinking cursor, and since
       -- there are no changes, the rest of the processing can be skipped;
       -- the reason for `alreadyProcessed` is that it is not possible
@@ -1095,8 +1090,6 @@ function CreateEditor(bare)
          alreadyProcessed = 0
       end
       alreadyProcessed = alreadyProcessed + 1
-
-      PackageEventHandle("onEditorUpdateUI", editor, event)
 
       if ide.osname ~= 'Windows' then updateStatusText(editor) end
 

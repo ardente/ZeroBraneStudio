@@ -56,6 +56,7 @@ ide.config.keymap = {
   [ID_NAVIGATETOFILE]   = "Ctrl-P",
   [ID_NAVIGATETOLINE]   = "Ctrl-G",
   [ID_NAVIGATETOSYMBOL] = "Ctrl-B",
+  [ID_NAVIGATETOMETHOD] = "Ctrl-;",
 -- Search menu
   [ID_FIND]             = "Ctrl-F",
   [ID_FINDNEXT]         = "F3",
@@ -87,6 +88,7 @@ ide.config.keymap = {
   [ID_STEP]             = "F10",
   [ID_STEPOVER]         = "Shift-F10",
   [ID_STEPOUT]          = "Ctrl-F10",
+  [ID_RUNTO]            = "Ctrl-Shift-F10",
   [ID_TRACE]            = "",
   [ID_BREAK]            = "Shift-F9",
   [ID_TOGGLEBREAKPOINT] = "F9",

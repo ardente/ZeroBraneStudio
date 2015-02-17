@@ -86,6 +86,9 @@ ide = {
       showonefile = false,
       sort = false,
     },
+    commandbar = {
+      prefilter = 250, -- number of records after which to apply filtering
+    },
 
     toolbar = {
       icons = {},
@@ -114,6 +117,7 @@ ide = {
       maxlength = 450,
     },
     arg = {}, -- command line arguments
+    api = {}, -- additional APIs to load
 
     format = { -- various formatting strings
       menurecentprojects = "%f | %i",
@@ -128,6 +132,7 @@ ide = {
     outlineinactivity = 0.250, -- seconds
     filehistorylength = 20,
     projecthistorylength = 20,
+    bordersize = 2,
     savebak = false,
     singleinstance = false,
     singleinstanceport = 0xe493,
@@ -548,9 +553,7 @@ do
   for _, filename in ipairs(filenames) do
     if filename ~= "--" then
       if wx.wxDirExists(filename) then
-        local dir = wx.wxFileName.DirName(filename)
-        dir:Normalize() -- turn into absolute path if needed
-        ProjectUpdateProjectDir(dir:GetFullPath())
+        ProjectUpdateProjectDir(filename)
       elseif not ActivateFile(filename) then
         DisplayOutputLn(("Can't open file '%s': %s"):format(filename, wx.wxSysErrorMsg()))
       end

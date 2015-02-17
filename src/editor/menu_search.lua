@@ -27,6 +27,7 @@ findMenu:Append(ID_NAVIGATE, TR("Navigate"), wx.wxMenu {
   { ID_NAVIGATETOFILE, TR("Go To File...")..KSC(ID_NAVIGATETOFILE), TR("Go to file") },
   { ID_NAVIGATETOLINE, TR("Go To Line...")..KSC(ID_NAVIGATETOLINE), TR("Go to line") },
   { ID_NAVIGATETOSYMBOL, TR("Go To Symbol...")..KSC(ID_NAVIGATETOSYMBOL), TR("Go to symbol") },
+  { ID_NAVIGATETOMETHOD, TR("Insert Library Function...")..KSC(ID_NAVIGATETOMETHOD), TR("Find and insert library function") },
 })
 
 menuBar:Append(findMenu, TR("&Search"))
@@ -61,7 +62,7 @@ frame:Connect(ID_FINDNEXT, wx.wxEVT_COMMAND_MENU_SELECTED,
       local selection = editor:GetMainSelection() + 1
       if selection >= editor:GetSelections() then selection = 0 end
       editor:SetMainSelection(selection)
-      editor:EnsureCaretVisible()
+      editor:ShowPosEnforcePolicy(editor:GetCurrentPos())
     else
       if findReplace:GetSelectedString() or findReplace:HasText() then
         findReplace:FindString()
@@ -79,7 +80,7 @@ frame:Connect(ID_FINDPREV, wx.wxEVT_COMMAND_MENU_SELECTED,
       local selection = editor:GetMainSelection() - 1
       if selection < 0 then selection = editor:GetSelections() - 1 end
       editor:SetMainSelection(selection)
-      editor:EnsureCaretVisible()
+      editor:ShowPosEnforcePolicy(editor:GetCurrentPos())
     else
       if findReplace:GetSelectedString() or findReplace:HasText() then
         findReplace:FindString(true) -- search up
@@ -137,6 +138,7 @@ frame:Connect(ID_FINDSELECTPREV, wx.wxEVT_UPDATE_UI, onUpdateUISearchMenu)
 local markername = "commandbar.background"
 local mac = ide.osname == 'Macintosh'
 local win = ide.osname == 'Windows'
+local special = {SYMBOL = '@', LINE = ':', METHOD = ';'}
 local function navigateTo(default, selected)
   local styles = ide.config.styles
   local marker = ide:AddMarker(markername,
@@ -144,7 +146,7 @@ local function navigateTo(default, selected)
 
   local nb = ide:GetEditorNotebook()
   local selection = nb:GetSelection()
-  local files, preview, origline, functions
+  local files, preview, origline, functions, methods
 
   local function markLine(ed, toline)
     ed:MarkerDefine(ide:GetMarker(markername))
@@ -168,18 +170,34 @@ local function navigateTo(default, selected)
         ed:EnsureVisibleEnforcePolicy(origline-1)
       end
 
+      local pindex = preview and nb:GetPageIndex(preview)
       if enter then
-        local _, file, tabindex = unpack(t or {})
+        local fline, sline, tabindex = unpack(t or {})
         local ed = ide:GetEditor()
 
         -- jump to symbol; tabindex has the position of the symbol
-        if text and text:find('@') and tabindex then
+        if text and text:find(special.SYMBOL) and tabindex then
           ed:GotoPos(tabindex-1)
           ed:EnsureVisibleEnforcePolicy(ed:LineFromPosition(tabindex-1))
           ed:SetFocus() -- in case the focus is on some other panel
+        -- insert selected method
+        elseif text and text:find('^%s*'..special.METHOD) then
+          if ed then -- clean up text and insert at the current location
+            local method = sline
+            local isfunc = methods.desc[method][1]:find(q(method).."%s*%(")
+            local text = method .. (isfunc and "()" or "")
+            local pos = ed:GetCurrentPos()
+            ed:InsertText(pos, text)
+            ed:EnsureVisibleEnforcePolicy(ed:LineFromPosition(pos))
+            ed:GotoPos(pos + #method + (isfunc and 1 or 0))
+            if isfunc then -- show the tooltip
+              ide.frame:AddPendingEvent(wx.wxCommandEvent(
+                wx.wxEVT_COMMAND_MENU_SELECTED, ID_SHOWTOOLTIP))
+            end
+          end
         -- set line position in the (current) editor if requested
-        elseif text and text:find(':') then
-          local toline = tonumber(text:match(':(%d+)'))
+        elseif text and text:find(special.LINE..'(%d+)%s*$') then
+          local toline = tonumber(text:match(special.LINE..'(%d+)'))
           if toline and ed then
             ed:GotoLine(toline-1)
             ed:EnsureVisibleEnforcePolicy(toline-1)
@@ -187,16 +205,22 @@ local function navigateTo(default, selected)
           end
         elseif tabindex then -- switch to existing tab
           SetEditorSelection(tabindex)
-          if preview then -- close preview if not selected
-            local pindex = nb:GetPageIndex(preview)
-            if pindex ~= tabindex then ClosePage(pindex) end
+          if pindex and pindex ~= tabindex then ClosePage(pindex) end
+        -- load a new file (into preview if set)
+        elseif sline or text then
+          -- 1. use "text" if Ctrl/Cmd-Enter is used
+          -- 2. otherwise use currently selected file
+          -- 3. otherwise use "text"
+          local file = (wx.wxGetKeyState(wx.WXK_CONTROL) and text) or sline or text
+          local fullPath = MergeFullPath(ide:GetProject(), file)
+          if not LoadFile(fullPath, preview or nil)
+          and not ProjectUpdateProjectDir(fullPath) then
+            if pindex then ClosePage(pindex) end
           end
-        elseif file then -- load a new file (into preview if set)
-          LoadFile(MergeFullPath(ide:GetProject(), file), preview or nil, true)
         end
       else
         -- close preview
-        if preview then ClosePage(nb:GetPageIndex(preview)) end
+        if pindex then ClosePage(pindex) end
         -- restore original selection if canceled
         if nb:GetSelection() ~= selection then nb:SetSelection(selection) end
       end
@@ -213,11 +237,14 @@ local function navigateTo(default, selected)
       if ed and origline then ed:MarkerDeleteAll(marker) end
 
       -- reset cached functions if no symbol search
-      if text and not text:find('@') then
+      if text and not text:find(special.SYMBOL) then
         functions = nil
         if ed and origline then ed:EnsureVisibleEnforcePolicy(origline-1) end
       end
-      if ed and text and text:find('@') then
+      -- reset cached methods if no method search
+      if text and not text:find(special.METHOD) then methods = nil end
+
+      if ed and text and text:find(special.SYMBOL) then
         if not functions then
           local funcs, nums = OutlineFunctions(ed), {}
           functions = {pos = {}, src = {}}
@@ -230,7 +257,7 @@ local function navigateTo(default, selected)
             functions.pos[func.name..num] = func.pos
           end
         end
-        local symbol = text:match('@(.*)')
+        local symbol = text:match(special.SYMBOL..'(.*)')
         local nums = {}
         if #symbol > 0 then
           local topscore
@@ -251,8 +278,36 @@ local function navigateTo(default, selected)
             lines[n] = {name, functions.src[name..num], functions.pos[name..num]}
           end
         end
-      elseif text and text:find(':') then
-        local toline = tonumber(text:match(':(%d+)'))
+      elseif ed and text and text:find('^%s*'..special.METHOD) then
+        if not methods then
+          methods = {desc = {}}
+          local num = 1
+          if ed.api and ed.api.tip and ed.api.tip.shortfinfoclass then
+            for libname, lib in pairs(ed.api.tip.shortfinfoclass) do
+              for method, val in pairs(lib) do
+                local signature, desc = val:match('(.-)\n(.*)')
+                local m = libname..'.'..method
+                desc = desc and desc:gsub("\n", " ") or val
+                methods[num] = m
+                methods.desc[m] = {signature or (libname..'.'..method), desc}
+                num = num + 1
+              end
+            end
+          end
+        end
+        local method = text:match(special.METHOD..'(.*)')
+        if #method > 0 then
+          local topscore
+          for _, item in ipairs(CommandBarScoreItems(methods, method, 100)) do
+            local method, score = unpack(item)
+            topscore = topscore or score
+            if score > topscore / 4 and score > 1 then
+              table.insert(lines, { score, method })
+            end
+          end
+        end
+      elseif text and text:find(special.LINE..'(%d+)%s*$') then
+        local toline = tonumber(text:match(special.LINE..'(%d+)'))
         if toline and ed then markLine(ed, toline) end
       elseif text and #text > 0 and projdir and #projdir > 0 then
         -- populate the list of files
@@ -284,12 +339,21 @@ local function navigateTo(default, selected)
       end
       return lines
     end,
-    onItem = function(t) return unpack(t) end,
+    onItem = function(t)
+      if methods then
+        local score, method = unpack(t)
+        return ("%2d %s"):format(score, methods.desc[method][1]), methods.desc[method][2]
+      else
+        return unpack(t)
+      end
+    end,
     onSelection = function(t, text)
       local _, file, tabindex = unpack(t)
-      if text and text:find('@') then
+      if text and text:find(special.SYMBOL) then
         local ed = ide:GetEditor()
         if ed then markLine(ed, ed:LineFromPosition(tabindex-1)+1) end
+        return
+      elseif text and text:find(special.METHOD) then
         return
       end
 
@@ -330,9 +394,11 @@ end
 frame:Connect(ID_NAVIGATETOFILE, wx.wxEVT_COMMAND_MENU_SELECTED,
   function() navigateTo("") end)
 frame:Connect(ID_NAVIGATETOLINE, wx.wxEVT_COMMAND_MENU_SELECTED,
-  function() navigateTo(":") end)
+  function() navigateTo(special.LINE) end)
+frame:Connect(ID_NAVIGATETOMETHOD, wx.wxEVT_COMMAND_MENU_SELECTED,
+  function() navigateTo(special.METHOD) end)
 frame:Connect(ID_NAVIGATETOSYMBOL, wx.wxEVT_COMMAND_MENU_SELECTED,
   function()
     local ed = GetEditor()
-    navigateTo("@", ed and ed:ValueFromPosition(ed:GetCurrentPos()))
+    navigateTo(special.SYMBOL, ed and ed:ValueFromPosition(ed:GetCurrentPos()))
   end)

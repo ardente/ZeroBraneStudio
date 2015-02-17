@@ -40,9 +40,13 @@ local function findUnusedEditor()
 end
 
 function LoadFile(filePath, editor, file_must_exist, skipselection)
-  local filePath = wx.wxFileName(filePath)
+  filePath = filePath:gsub("%s+$","")
+  filePath = wx.wxFileName(filePath)
   filePath:Normalize() -- make it absolute and remove all .. and . if possible
   filePath = filePath:GetFullPath()
+
+  -- if the file name is empty or is a directory, don't do anything
+  if filePath == '' or wx.wxDirExists(filePath) then return nil end
 
   -- prevent files from being reopened again
   if (not editor) then
@@ -138,18 +142,19 @@ function LoadFile(filePath, editor, file_must_exist, skipselection)
   end
 
   editor:EmptyUndoBuffer()
-  local id = editor:GetId()
-  if openDocuments[id] then -- existing editor; switch to the tab
-    notebook:SetSelection(openDocuments[id].index)
+  local doc = ide:GetDocument(editor)
+  if doc then -- existing editor; switch to the tab
+    notebook:SetSelection(doc:GetTabIndex())
   else -- the editor has not been added to notebook
-    AddEditor(editor, wx.wxFileName(filePath):GetFullName()
+    doc = AddEditor(editor, wx.wxFileName(filePath):GetFullName()
       or ide.config.default.fullname)
   end
-  openDocuments[id].filePath = filePath
-  openDocuments[id].fileName = wx.wxFileName(filePath):GetFullName()
-  openDocuments[id].modTime = GetFileModTime(filePath)
+  doc.filePath = filePath
+  doc.fileName = wx.wxFileName(filePath):GetFullName()
+  doc.modTime = GetFileModTime(filePath)
 
-  SetDocumentModified(id, false, openDocuments[id].fileName)
+  doc:SetModified(false)
+  doc:SetTabText(doc:GetFileName())
 
   -- activate the editor; this is needed for those cases when the editor is
   -- created from some other element, for example, from a project tree.
@@ -201,9 +206,7 @@ end
 
 function ActivateFile(filename)
   local name, suffix, value = filename:match('(.+):([lLpP]?)(%d+)$')
-  if name and not wx.wxFileExists(filename) and not wx.wxIsAbsolutePath(filename) then
-    filename = name
-  end
+  if name and not wx.wxFileExists(filename) then filename = name end
 
   -- check if non-existing file can be loaded from the project folder;
   -- this is to handle: "project file" used on the command line
@@ -276,12 +279,14 @@ function SaveFile(editor, filePath)
     local ok, err = FileWrite(filePath, st)
     if ok then
       editor:SetSavePoint()
-      local id = editor:GetId()
-      openDocuments[id].filePath = filePath
-      openDocuments[id].fileName = wx.wxFileName(filePath):GetFullName()
-      openDocuments[id].modTime = GetFileModTime(filePath)
-      SetDocumentModified(id, false, openDocuments[id].fileName)
+      local doc = ide:GetDocument(editor)
+      doc.filePath = filePath
+      doc.fileName = wx.wxFileName(filePath):GetFullName()
+      doc.modTime = GetFileModTime(filePath)
+      doc:SetModified(false)
+      doc:SetTabText(doc:GetFileName())
       SetAutoRecoveryMark()
+      FileTreeMarkSelected(filePath)
 
       PackageEventHandle("onEditorSave", editor)
 
@@ -336,7 +341,6 @@ function SaveFileAs(editor)
 
     if cansave and SaveFile(editor, filePath) then
       SetEditorSelection() -- update title of the editor
-      FileTreeMarkSelected(filePath)
       if ext ~= GetFileExt(filePath) then
         -- new extension, so setup new keywords and re-apply indicators
         editor:ClearDocumentStyle() -- remove styles from the document
@@ -502,7 +506,7 @@ function SaveOnExit(allow_cancel)
   -- are still modified as not modified (they don't need to be saved)
   -- to keep their tab names correct
   for id, document in pairs(openDocuments) do
-    if document.isModified then SetDocumentModified(id, false) end
+    if document.isModified then document:SetModified(false) end
   end
 
   return true
@@ -736,21 +740,21 @@ function SetOpenTabs(params)
     DisplayOutputLn(TR("Found auto-recovery record and restored saved session."))
   end
   for _,doc in ipairs(nametab) do
-    -- check for missing file is no content is stored
+    -- check for missing file if no content is stored
     if doc.filepath and not doc.content and not wx.wxFileExists(doc.filepath) then
       DisplayOutputLn(TR("File '%s' is missing and can't be recovered.")
         :format(doc.filepath))
     else
       local editor = (doc.filepath and LoadFile(doc.filepath,nil,true,true)
         or findUnusedEditor() or NewFile(doc.filename))
-      local opendoc = openDocuments[editor:GetId()]
+      local opendoc = ide:GetDocument(editor)
       if doc.content then
         editor:SetText(doc.content)
         if doc.filepath and opendoc.modTime and doc.modified < opendoc.modTime:GetTicks() then
           DisplayOutputLn(TR("File '%s' has more recent timestamp than restored '%s'; please review before saving.")
-            :format(doc.filepath, doc.tabname))
+            :format(doc.filepath, opendoc:GetTabText()))
         end
-        SetDocumentModified(editor:GetId(), true)
+        opendoc:SetModified(true)
       end
       editor:GotoPosDelayed(doc.cursorpos or 0)
     end
@@ -762,21 +766,22 @@ end
 local function getOpenTabs()
   local opendocs = {}
   for _, document in pairs(ide.openDocuments) do
+    local editor = document:GetEditor()
     table.insert(opendocs, {
-      filename = document.fileName,
-      filepath = document.filePath,
-      tabname = notebook:GetPageText(document.index),
-      modified = document.modTime and document.modTime:GetTicks(), -- get number of seconds
-      content = document.isModified and document.editor:GetText() or nil,
-      id = document.index, cursorpos = document.editor:GetCurrentPos()})
+      filename = document:GetFileName(),
+      filepath = document:GetFilePath(),
+      tabname = document:GetTabText(),
+      modified = document:GetModTime() and document:GetModTime():GetTicks(), -- get number of seconds
+      content = document:IsModified() and editor:GetText() or nil,
+      id = document:GetTabIndex(),
+      cursorpos = editor:GetCurrentPos()})
   end
 
   -- to keep tab order
   table.sort(opendocs, function(a,b) return (a.id < b.id) end)
 
-  local id = GetEditor()
-  id = id and id:GetId()
-  return opendocs, {index = (id and openDocuments[id].index or 0)}
+  local doc = ide:GetDocument(GetEditor())
+  return opendocs, {index = (doc and doc:GetTabIndex() or 0)}
 end
 
 function SetAutoRecoveryMark()

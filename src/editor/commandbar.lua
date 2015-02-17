@@ -172,11 +172,31 @@ function CommandBarShow(params)
 
   local function onKeyDown(event)
     local keycode = event:GetKeyCode()
-    if keycode == wx.WXK_UP then
-      linenow = linenow - 1
-      if linenow <= 0 then linenow = linesnow end
+    if keycode == wx.WXK_RETURN then
+      onExit(linenow)
+      return
+    elseif event:GetModifiers() ~= wx.wxMOD_NONE then
+      event:Skip()
+      return
+    elseif keycode == wx.WXK_UP then
+      if linesnow > 0 then
+        linenow = linenow - 1
+        if linenow <= 0 then linenow = linesnow end
+      end
     elseif keycode == wx.WXK_DOWN then
-      if linesnow > 0 then linenow = linenow % linesnow + 1 end
+      if linesnow > 0 then
+        linenow = linenow % linesnow + 1
+      end
+    elseif keycode == wx.WXK_PAGEDOWN then
+      if linesnow > 0 then
+        linenow = linenow + maxlines
+        if linenow > linesnow then linenow = linesnow end
+      end
+    elseif keycode == wx.WXK_PAGEUP then
+      if linesnow > 0 then
+        linenow = linenow - maxlines
+        if linenow <= 0 then linenow = 1 end
+      end
     elseif keycode == wx.WXK_ESCAPE then
       onExit()
       return
@@ -289,8 +309,11 @@ function CommandBarScoreItems(t, pattern, limit)
   local r, plen = {}, #pattern
   local maxp = 0
   local num = 0
+  local prefilter = ide.config.commandbar and ide.config.commandbar.prefilter <= #t
+    and pattern:gsub("[^%w_]+",""):lower():gsub(".", "%1.*"):gsub("%.%*$","")
+    or nil
   for _, v in ipairs(t) do
-    if #v >= plen then
+    if #v >= plen and (not prefilter or v:lower():find(prefilter)) then
       local p = score(pattern, v)
       maxp = math.max(p, maxp)
       if p > 1 and p > maxp / 4 then

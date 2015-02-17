@@ -157,6 +157,11 @@ function ide:GetEditorNotebook() return self.frame.notebook end
 function ide:GetOutputNotebook() return self.frame.bottomnotebook end
 function ide:GetProjectNotebook() return self.frame.projnotebook end
 function ide:GetProject() return FileTreeGetDir() end
+function ide:GetProjectStartFile()
+  local projectdir = FileTreeGetDir()
+  local startfile = ide.filetree.settings.startfile[projectdir]
+  return MergeFullPath(projectdir, startfile), startfile
+end
 function ide:GetLaunchedProcess() return self.debugger and self.debugger.pid end
 function ide:GetProjectTree() return ide.filetree.projtreeCtrl end
 function ide:GetOutlineTree() return ide.outline.outlineCtrl end
@@ -164,6 +169,33 @@ function ide:GetWatch() return self.debugger and self.debugger.watchCtrl end
 function ide:GetStack() return self.debugger and self.debugger.stackCtrl end
 function ide:Yield() wx.wxYield() end
 function ide:CreateBareEditor() return CreateEditor(true) end
+function ide:CreateStyledTextCtrl(...)
+  local editor = wxstc.wxStyledTextCtrl(...)
+  function editor:GotoPosEnforcePolicy(pos)
+    self:GotoPos(pos)
+    self:EnsureVisibleEnforcePolicy(self:LineFromPosition(pos))
+  end
+
+  local function getMarginWidth(editor)
+    local width = 0
+    for m = 0, 7 do width = width + editor:GetMarginWidth(m) end
+    return width
+  end
+
+  function editor:ShowPosEnforcePolicy(pos)
+    local line = self:LineFromPosition(pos)
+    self:EnsureVisibleEnforcePolicy(line)
+    -- skip the rest if line wrapping is on
+    if editor:GetWrapMode() ~= wxstc.wxSTC_WRAP_NONE then return end
+    local xwidth = self:GetClientSize():GetWidth() - getMarginWidth(self)
+    local xoffset = self:GetTextExtent(self:GetLine(line):sub(1, pos-self:PositionFromLine(line)+1))
+    self:SetXOffset(xoffset > xwidth and xoffset-xwidth or 0)
+  end
+
+  return editor
+end
+
+function ide:LoadFile(...) return LoadFile(...) end
 
 function ide:GetSetting(path, setting)
   local settings = self.settings

@@ -94,6 +94,39 @@ ok(value and value:find("close"), "Auto-complete is shown after comma.")
 ok(not (CreateAutoCompList(editor, "pri.") or ""):match('print'),
   "Auto-complete doesn't offer 'print' after 'pri.'.")
 
+editor:SetText('')
+editor:AddText('-- @tparam string foo\n')
+editor.assignscache = false
+
+ok((CreateAutoCompList(editor, "foo.") or ""):match('byte'),
+  "Auto-complete offers methods for variable defined as '@tparam string'.")
+
+editor:SetText('')
+editor:AddText('-- @param[type=string] foo\n')
+editor.assignscache = false
+
+ok((CreateAutoCompList(editor, "foo:") or ""):match('byte'),
+  "Auto-complete offers methods for variable defined as '@param[type=string]'.")
+
+local strategy = ide.config.acandtip.strategy
+ide.config.acandtip.strategy = 1
+
+editor:SetText('')
+editor:AddText('local value\nprint(va')
+IndicateAll(editor)
+
+local status, res = pcall(CreateAutoCompList, editor, "va")
+ok(status and (res or ""):match('value'),
+  "Auto-complete offers methods for strategy=1' (1/2).")
+
+editor:SetText('')
+editor:AddText('local value\nprint(va')
+
+local status, res = pcall(CreateAutoCompList, editor, "va")
+ok(status and (res or ""):match('value'),
+  "Auto-complete offers methods for strategy=1' (2/2).")
+
 -- cleanup
+ide.config.acandtip.strategy = strategy
 ide:GetDocument(editor).isModified = false
 ClosePage()

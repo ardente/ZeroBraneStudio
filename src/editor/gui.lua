@@ -394,7 +394,7 @@ local function createBottomNotebook(frame)
   bottomnotebook:Connect(wxaui.wxEVT_COMMAND_AUINOTEBOOK_PAGE_CLOSE,
     function (event) event:Veto() end)
 
-  local errorlog = wxstc.wxStyledTextCtrl(bottomnotebook, wx.wxID_ANY,
+  local errorlog = ide:CreateStyledTextCtrl(bottomnotebook, wx.wxID_ANY,
     wx.wxDefaultPosition, wx.wxDefaultSize, wx.wxBORDER_NONE)
 
   errorlog:Connect(wx.wxEVT_CONTEXT_MENU,
@@ -417,7 +417,7 @@ local function createBottomNotebook(frame)
   errorlog:Connect(ID_CLEAROUTPUT, wx.wxEVT_COMMAND_MENU_SELECTED,
     function(event) ClearOutput(true) end)
 
-  local shellbox = wxstc.wxStyledTextCtrl(bottomnotebook, wx.wxID_ANY,
+  local shellbox = ide:CreateStyledTextCtrl(bottomnotebook, wx.wxID_ANY,
     wx.wxDefaultPosition, wx.wxDefaultSize, wx.wxBORDER_NONE)
 
   bottomnotebook:AddPage(errorlog, TR("Output"), true)
@@ -478,9 +478,12 @@ do
     Bottom():Layer(1):Position(1):PaneBorder(false):
     CloseButton(true):MaximizeButton(false):PinButton(true))
 
-  for _, uimgr in pairs {mgr, frame.notebook:GetAuiManager(),
-    frame.bottomnotebook:GetAuiManager(), frame.projnotebook:GetAuiManager()} do
-    uimgr:GetArtProvider():SetMetric(wxaui.wxAUI_DOCKART_SASH_SIZE, 2)
+  if type(ide.config.bordersize) == 'number' then
+    for _, uimgr in pairs {mgr, frame.notebook:GetAuiManager(),
+      frame.bottomnotebook:GetAuiManager(), frame.projnotebook:GetAuiManager()} do
+      uimgr:GetArtProvider():SetMetric(wxaui.wxAUI_DOCKART_SASH_SIZE,
+        ide.config.bordersize)
+    end
   end
 
   for _, nb in pairs {frame.bottomnotebook, frame.projnotebook} do

@@ -25,7 +25,6 @@ return {
   ["&Fold/Unfold All"] = "Св&ернуть/развернуть все", -- src\editor\menu_edit.lua
   ["&Frequently Asked Questions"] = "&Часто задаваемые вопросы", -- src\editor\menu_help.lua
   ["&Getting Started Guide"] = nil, -- src\editor\menu_help.lua
-  ["&Go To Line..."] = "&Перейти к строке...", -- src\editor\menu_search.lua
   ["&Help"] = "&Справка", -- src\editor\menu_help.lua
   ["&New Directory"] = "&Новая папка", -- src\editor\filetree.lua
   ["&New"] = "Соз&дать", -- src\editor\menu_file.lua
@@ -58,8 +57,8 @@ return {
   ["Add Watch Expression"] = "Добавить выражение", -- src\editor\editor.lua
   ["All files"] = "Все файлы", -- src\editor\commands.lua
   ["Allow external process to start debugging"] = "Разрешить внешнему процессу начать отладку", -- src\editor\menu_project.lua
-  ["Analyze the source code"] = "Проанализировать исходный код", -- src\editor\inspect.lua, src\editor\inspect.lua-profile
-  ["Analyze"] = "Анализировать", -- src\editor\inspect.lua, src\editor\inspect.lua-profile
+  ["Analyze the source code"] = "Проанализировать исходный код", -- src\editor\inspect.lua
+  ["Analyze"] = "Анализировать", -- src\editor\inspect.lua
   ["Auto Complete Identifiers"] = "Автодополнение идентификаторов", -- src\editor\menu_edit.lua
   ["Auto complete while typing"] = "Автоматически дополнять идентификаторы при наборе", -- src\editor\menu_edit.lua
   ["Bookmark"] = "Закладка", -- src\editor\menu_edit.lua
@@ -108,7 +107,7 @@ return {
   ["Debugger server stopped at %s:%d."] = "Сервер отладки остановлен %s:%d.", -- src\editor\debugger.lua
   ["Debugging session completed (%s)."] = "Отладочная сессия завершена (%s).", -- src\editor\debugger.lua
   ["Debugging session started in '%s'."] = "Отладочная сессия запущена в '%s'.", -- src\editor\debugger.lua
-  ["Debugging suspended at %s:%s (couldn't activate the file)."] = "Отладка остановлена на %s:%s (невозможно открыть файл).", -- src\editor\debugger.lua
+  ["Debugging suspended at '%s:%s' (couldn't activate the file)."] = "Отладка остановлена в '%s:%s' (невозможно активировать файл).", -- src\editor\debugger.lua
   ["Detach &Process"] = "Отсоединить процесс", -- src\editor\menu_project.lua
   ["Directory"] = "Папка", -- src\editor\findreplace.lua
   ["Do you want to delete '%s'?"] = "Удалить '%s'?", -- src\editor\filetree.lua
@@ -118,7 +117,6 @@ return {
   ["E&xit"] = "Вы&ход", -- src\editor\menu_file.lua
   ["Enter Lua code and press Enter to run it."] = "Введите код на Lua и нажмите Enter для выполнения.", -- src\editor\shellbox.lua
   ["Enter command line parameters (use Cancel to clear)"] = "Введите параметры командной строки (Cancel чтобы очистить)", -- src\editor\menu_project.lua
-  ["Enter line number"] = "Введите номер строки", -- src\editor\menu_search.lua
   ["Enter replacement text"] = "Введите текст замены", -- src\editor\editor.lua
   ["Error while loading API file: %s"] = "Ошибка загрузки файла определений API: %s", -- src\editor\autocomplete.lua
   ["Error while loading configuration file: %s"] = "Ошибка загрузки файла конфигурации: %s", -- src\editor\style.lua
@@ -132,7 +130,7 @@ return {
   ["Exit program"] = "Выйти из программы", -- src\editor\menu_file.lua
   ["File '%s' has been modified on disk."] = "Файл '%s' был изменен на диске.", -- src\editor\editor.lua
   ["File '%s' has more recent timestamp than restored '%s'; please review before saving."] = "Файл '%s' имеет более позднее время модификации, чем восстановленный '%s'; пожалуйста просмотрите его перед сохранением.", -- src\editor\commands.lua
-  ["File '%s' is missing and can't be recovered."] = nil, -- src\editor\commands.lua
+  ["File '%s' is missing and can't be recovered."] = "Файл '%s' отсутствует и не может быть восстановлен.", -- src\editor\commands.lua
   ["File '%s' no longer exists."] = "Файл '%s' больше не существует.", -- src\editor\menu_file.lua, src\editor\editor.lua
   ["File Type"] = "Тип файла", -- src\editor\findreplace.lua
   ["File already exists."] = "Файл уже существует.", -- src\editor\commands.lua
@@ -141,6 +139,7 @@ return {
   ["Find &Next"] = "Найти &далее", -- src\editor\menu_search.lua
   ["Find &Previous"] = "Найти &ранее", -- src\editor\menu_search.lua
   ["Find In Files"] = "Найти в файлах", -- src\editor\findreplace.lua
+  ["Find and insert library function"] = "Найти и вставить библиотечную функцию", -- src\editor\menu_search.lua
   ["Find and replace text in files"] = "Найти и заменить текст в файлах", -- src\editor\menu_search.lua
   ["Find and replace text"] = "Найти и заменить текст", -- src\editor\menu_search.lua
   ["Find text in files"] = "Найти текст в файлах", -- src\editor\menu_search.lua
@@ -153,13 +152,19 @@ return {
   ["Found"] = "Найдено", -- src\editor\findreplace.lua
   ["Full &Screen"] = "Во весь экр&ан", -- src\editor\menu_view.lua
   ["Go To Definition"] = "Перейти к определению", -- src\editor\editor.lua
-  ["Go To Line"] = "Перейти к строке", -- src\editor\menu_search.lua
+  ["Go To File..."] = "Перейти к файлу...", -- src\editor\menu_search.lua
+  ["Go To Line..."] = "Перейти к строке...", -- src\editor\menu_search.lua
   ["Go To Next Bookmark"] = "Перейти к следующей закладке", -- src\editor\menu_edit.lua
   ["Go To Previous Bookmark"] = "Перейти к предыдущей закладке", -- src\editor\menu_edit.lua
-  ["Go to a selected line"] = "Перейти к заданной строке", -- src\editor\menu_search.lua
+  ["Go To Symbol..."] = "Перейти к символу...", -- src\editor\menu_search.lua
+  ["Go to file"] = "Перейти к файлу", -- src\editor\menu_search.lua
+  ["Go to line"] = "Перейти к строке", -- src\editor\menu_search.lua
+  ["Go to symbol"] = "Перейти к символу", -- src\editor\menu_search.lua
+  ["Hide '.%s' Files"] = "Спрятать '.%s' файлы", -- src\editor\filetree.lua
   ["INS"] = "ВСТ", -- src\editor\editor.lua
   ["Ignored error in debugger initialization code: %s."] = nil, -- src\editor\debugger.lua
   ["In Files"] = "Установки файлов", -- src\editor\findreplace.lua
+  ["Insert Library Function..."] = "Вставить библиотечную функцию...", -- src\editor\menu_search.lua
   ["Known Files"] = "Файлы Lua", -- src\editor\commands.lua
   ["Ln: %d"] = "Стр: %d", -- src\editor\editor.lua
   ["Local console"] = "Локальная консоль", -- src\editor\gui.lua, src\editor\shellbox.lua
@@ -168,6 +173,7 @@ return {
   ["Match &case"] = "Совпадение регистра", -- src\editor\findreplace.lua
   ["Match &whole word"] = "Совпадение целого слова", -- src\editor\findreplace.lua
   ["Mixed end-of-line encodings detected."] = "Обнаружены смешанные символы конца строки.", -- src\editor\commands.lua
+  ["Navigate"] = "Перейти", -- src\editor\menu_search.lua
   ["New &File"] = "Новый файл", -- src\editor\filetree.lua
   ["OVR"] = "ЗАМ", -- src\editor\editor.lua
   ["Open With Default Program"] = "Открыть используя программу по умолчанию", -- src\editor\filetree.lua
@@ -198,7 +204,7 @@ return {
   ["R/O"] = "R/O", -- src\editor\editor.lua
   ["R/W"] = "R/W", -- src\editor\editor.lua
   ["Re&place In Files"] = "Замени&ть в файлах", -- src\editor\menu_search.lua
-  ["Re-indent selected lines"] = nil, -- src\editor\menu_edit.lua
+  ["Re-indent selected lines"] = "Исправить отступ в выделенных строчках", -- src\editor\menu_edit.lua
   ["Recent &Projects"] = "Недавние &проекты", -- src\editor\menu_file.lua
   ["Recent Files"] = "Недавние файлы", -- src\editor\menu_file.lua
   ["Redo last edit undone"] = "Вернуть последнее отмененное изменение", -- src\editor\menu_edit.lua
@@ -207,7 +213,7 @@ return {
   ["Remote console"] = "Удаленная консоль", -- src\editor\shellbox.lua
   ["Rename All Instances"] = "Переименовать все совпадения", -- src\editor\editor.lua
   ["Replace A&ll"] = "Заменить все", -- src\editor\findreplace.lua
-  ["Replace All Selections"] = nil, -- src\editor\editor.lua
+  ["Replace All Selections"] = "Заменить все выделенные фрагменты", -- src\editor\editor.lua
   ["Replace"] = "Заменить", -- src\editor\findreplace.lua
   ["Replaced an invalid UTF8 character with %s."] = "Некорректный символ UTF8 заменен на %s.", -- src\editor\commands.lua
   ["Replaced"] = "Заменено", -- src\editor\findreplace.lua
@@ -242,7 +248,11 @@ return {
   ["Settings: System"] = "Установки: Системы", -- src\editor\menu_edit.lua
   ["Settings: User"] = "Установки: Пользователя", -- src\editor\menu_edit.lua
   ["Show &Tooltip"] = "Показать &подсказку", -- src\editor\menu_edit.lua
+  ["Show All Files"] = "Показать все файлы", -- src\editor\filetree.lua
+  ["Show Hidden Files"] = "Показать спрятанные файлы", -- src\editor\filetree.lua
   ["Show Location"] = "Показать файл в папке", -- src\editor\gui.lua, src\editor\filetree.lua
+  ["Show all files"] = "Показать все файлы", -- src\editor\filetree.lua
+  ["Show files previously hidden"] = "Показать ранее спрятанные файлы", -- src\editor\filetree.lua
   ["Show tooltip for current position; place cursor after opening bracket of function"] = "Показать подсказку в текущей позиции; переместите курсор в позицию после открывающей скобки функции", -- src\editor\menu_edit.lua
   ["Show/Hide the status bar"] = "Показать/спрятать панель состояния", -- src\editor\menu_view.lua
   ["Show/Hide the toolbar"] = "Показать/спрятать панель инструментов", -- src\editor\menu_view.lua
@@ -270,7 +280,7 @@ return {
   ["Trace execution showing each executed line"] = "Отслеживать выполнение, показывая каждую выполненную строку", -- src\editor\menu_project.lua
   ["Unable to create directory '%s'."] = "Ошибка создания папки '%s'.", -- src\editor\filetree.lua
   ["Unable to create file '%s'."] = "Ошибка создания файла '%s'.", -- src\editor\filetree.lua
-  ["Unable to delete directory '%s': %s"] = nil, -- src\editor\filetree.lua
+  ["Unable to delete directory '%s': %s"] = "Ошибка удаления директории '%s': %s", -- src\editor\filetree.lua
   ["Unable to load file '%s'."] = "Ошибка загрузки файла '%s'.", -- src\editor\commands.lua
   ["Unable to rename file '%s'."] = "Ошибка переименования файла '%s'.", -- src\editor\filetree.lua
   ["Unable to save file '%s': %s"] = "Ошибка сохранения файла '%s': %s", -- src\editor\commands.lua
@@ -280,7 +290,7 @@ return {
   ["Use '%s' to show line endings and '%s' to convert them."] = "Используйте '%s' для отображения символов конца строки и '%s' для их преобразования.", -- src\editor\commands.lua
   ["Use 'clear' to clear the shell output and the history."] = "Используйте команду 'clear' для очистки содержимого окна и истории.", -- src\editor\shellbox.lua
   ["Use Shift-Enter for multiline code."] = "Используйте Shift-Enter для многострочного кода.", -- src\editor\shellbox.lua
-  ["View the outline window"] = nil, -- src\editor\menu_view.lua
+  ["View the outline window"] = "Показать окно структуры", -- src\editor\menu_view.lua
   ["View the output/console window"] = "Показать окно вывода/консоли", -- src\editor\menu_view.lua
   ["View the project/filetree window"] = "Показать окно проекта/списка файлов", -- src\editor\menu_view.lua
   ["View the stack window"] = "Показать окно стека", -- src\editor\menu_view.lua
