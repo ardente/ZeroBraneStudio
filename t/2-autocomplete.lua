@@ -27,6 +27,15 @@ ok(pcall(CreateAutoCompList, editor, "%1000"),
 
 editor:SetText('')
 editor:AddText([[
+  local tweaks = require("tweaks")
+  local require = tweaks.require
+  local modules = tweaks.modules]])
+
+ok(limit(10000, function() CreateAutoCompList(editor, "tweaks.modules") end),
+  "Auto-complete doesn't loop for recursive 'modules'.")
+
+editor:SetText('')
+editor:AddText([[
   result = result.list[1]  --> "does the test" test
   result.1
 ]])
@@ -51,6 +60,15 @@ editor:AddText([[
 
 ok(limit(10000, function() EditorAutoComplete(editor) end),
   "Auto-complete doesn't loop for classes that reference '...'.")
+
+editor:SetText('')
+editor:AddText([[
+  buf = str
+  str = buf..str
+  buf = buf..]])
+
+ok(limit(10000, function() EditorAutoComplete(editor) end),
+  "Auto-complete doesn't loop for string concatenations with self-reference.")
 
 -- create a valuetype self-reference
 -- this is to test "s = Scan(); s:" fragment
@@ -78,7 +96,28 @@ ok(c == 1,
   ("Auto-complete doesn't offer duplicates with the same name ('%s').")
     :format(ac))
 
+for k, v in pairs({
+    ree = "repeat require",
+    ret = "return repeat rawget rawset",
+}) do
+  local ac = CreateAutoCompList(editor, k)
+  is(ac, v,
+    ("Auto-complete for '%s' offers results in the expected order."):format(k))
+end
+
 ProjectSetInterpreter(interpreter)
+
+editor:SetText('')
+editor:AddText('local t = require("table")\nt.')
+local ac = CreateAutoCompList(editor, "t.")
+ok(ac ~= nil and ac:find("concat") ~= nil,
+  "Auto-complete recognizes variables set based on `require`.")
+
+editor:SetText('')
+editor:AddText('local table = require("io")\nt = require("table")\nt.')
+local ac = CreateAutoCompList(editor, "t.")
+ok(ac ~= nil and ac:find("concat") ~= nil,
+  "Auto-complete recognizes variables set based on `require` even when it's re-assigned.")
 
 editor:SetText('')
 editor:AddText('print(1,io.')
@@ -93,6 +132,23 @@ ok(value and value:find("close"), "Auto-complete is shown after comma.")
 
 ok(not (CreateAutoCompList(editor, "pri.") or ""):match('print'),
   "Auto-complete doesn't offer 'print' after 'pri.'.")
+
+editor:SetText('')
+editor:AddText('local name = "abc"; local namelen = #name')
+IndicateAll(editor)
+EditorAutoComplete(editor)
+local isactive = editor:AutoCompActive()
+editor:AutoCompCancel() -- cleanup
+
+ok(not isactive, "Auto-complete is not shown if typed sequence matches one of the options.")
+
+editor:SetText('')
+editor:AddText(' -- a = io\na:')
+editor:Colourise(0, -1) -- set proper styles
+editor.assignscache = false
+
+ok((CreateAutoCompList(editor, "a:") or "") == "",
+  "Auto-complete doesn't process assignments in comments.")
 
 editor:SetText('')
 editor:AddText('-- @tparam string foo\n')

@@ -1,4 +1,4 @@
--- Copyright 2011-14 Paul Kulchenko, ZeroBrane LLC
+-- Copyright 2011-15 Paul Kulchenko, ZeroBrane LLC
 -- authors: Lomtik Software (J. Winwood & John Labenski)
 -- Luxinia Dev (Eike Decker & Christoph Kubisch)
 ---------------------------------------------------------
@@ -61,8 +61,10 @@ local panels = {
 
 local function togglePanel(event)
   local panel = panels[event:GetId()]
-  local shown = not uimgr:GetPane(panel):IsShown()
-  uimgr:GetPane(panel):Show(shown)
+  local pane = uimgr:GetPane(panel)
+  local shown = not pane:IsShown()
+  if not shown then pane:BestSize(pane.window:GetSize()) end
+  pane:Show(shown)
   uimgr:Update()
 
   return shown

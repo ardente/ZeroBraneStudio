@@ -1,4 +1,4 @@
--- Copyright 2011-14 Paul Kulchenko, ZeroBrane LLC
+-- Copyright 2011-15 Paul Kulchenko, ZeroBrane LLC
 -- authors: Luxinia Dev (Eike Decker & Christoph Kubisch)
 -- Lomtik Software (J. Winwood & John Labenski)
 ---------------------------------------------------------
@@ -44,16 +44,16 @@ local function createFrame()
     end)
 
   local menuBar = wx.wxMenuBar()
-  local statusBar = frame:CreateStatusBar(6)
+  local statusBar = frame:CreateStatusBar(5)
   local section_width = statusBar:GetTextExtent("OVRW")
-  statusBar:SetStatusStyles({wx.wxSB_FLAT, wx.wxSB_FLAT, wx.wxSB_FLAT,
-      wx.wxSB_FLAT, wx.wxSB_FLAT, wx.wxSB_FLAT})
-  statusBar:SetStatusWidths(
-    {-1, section_width*6, section_width, section_width, section_width*5, section_width*4})
+  statusBar:SetStatusStyles({wx.wxSB_FLAT, wx.wxSB_FLAT, wx.wxSB_FLAT, wx.wxSB_FLAT, wx.wxSB_FLAT})
+  statusBar:SetStatusWidths({-1, section_width, section_width, section_width*5, section_width*4})
   statusBar:SetStatusText(GetIDEString("statuswelcome"))
 
   local mgr = wxaui.wxAuiManager()
   mgr:SetManagedWindow(frame)
+  -- allow the panes to be larger than the defalt 1/3 of the main window size
+  mgr:SetDockSizeConstraint(0.8,0.8)
 
   frame.menuBar = menuBar
   frame.statusBar = statusBar
@@ -74,8 +74,9 @@ local function menuDropDownPosition(event)
 end
 
 local function tbIconSize()
+  -- use large icons by default on OSX and on large screens
   local iconsize = (tonumber(ide.config.toolbar and ide.config.toolbar.iconsize)
-    or (ide.osname == 'Macintosh' and 24 or 16))
+    or ((ide.osname == 'Macintosh' or wx.wxGetClientDisplayRect():GetWidth() >= 1500) and 24 or 16))
   if iconsize ~= 24 then iconsize = 16 end
   return iconsize
 end
@@ -100,7 +101,7 @@ local function createToolBar(frame)
           local icon, description = unpack(iconmap)
           local isbitmap = type(icon) == "userdata" and icon:GetClassInfo():GetClassName() == "wxBitmap"
           local bitmap = isbitmap and icon or ide:GetBitmap(icon, "TOOLBAR", toolBmpSize)
-          toolBar:AddTool(id, "", bitmap, TR(description)..SCinB(id))
+          toolBar:AddTool(id, "", bitmap, (TR)(description)..SCinB(id))
         end
       end
       prev = id
@@ -201,6 +202,8 @@ local function createNotebook(frame)
           local editor = GetEditor(page)
           if editor then ide.openDocuments[editor:GetId()].index = page end
         end
+        -- first set the selection on the dragged tab to reset its state
+        notebook:SetSelection(event:GetSelection())
         -- select the content of the tab after drag is done
         SetEditorSelection(event:GetSelection())
         event:Skip()
@@ -273,11 +276,7 @@ local function createNotebook(frame)
   notebook:Connect(ID_SHOWLOCATION, wx.wxEVT_UPDATE_UI, IfAtLeastOneTab)
 
   notebook:Connect(ID_COPYFULLPATH, wx.wxEVT_COMMAND_MENU_SELECTED, function()
-      local tdo = wx.wxTextDataObject(ide:GetDocument(GetEditor(selection)):GetFilePath())
-      if wx.wxClipboard:Get():Open() then
-        wx.wxClipboard:Get():SetData(tdo)
-        wx.wxClipboard:Get():Close()
-      end
+      ide:CopyToClipboard(ide:GetDocument(GetEditor(selection)):GetFilePath())
     end)
 
   frame.notebook = notebook
@@ -297,6 +296,7 @@ local function addDND(notebook)
         if winid == ide:GetOutput():GetId()
         or winid == ide:GetConsole():GetId()
         or winid == ide:GetProjectTree():GetId()
+        or ide.findReplace:IsPreview(win) -- search results preview
         then return end
 
         local mgr = ide.frame.uimgr
@@ -390,17 +390,37 @@ local function createBottomNotebook(frame)
 
   addDND(bottomnotebook)
 
+  bottomnotebook:Connect(wxaui.wxEVT_COMMAND_AUINOTEBOOK_PAGE_CHANGED,
+    function (event)
+      if not ide.findReplace then return end
+      local nb = event:GetEventObject():DynamicCast("wxAuiNotebook")
+      local preview = ide.findReplace:IsPreview(nb:GetPage(nb:GetSelection()))
+      local flags = nb:GetWindowStyleFlag()
+      if preview and bit.band(flags, wxaui.wxAUI_NB_CLOSE_ON_ACTIVE_TAB) == 0 then
+        nb:SetWindowStyleFlag(flags + wxaui.wxAUI_NB_CLOSE_ON_ACTIVE_TAB)
+      elseif not preview and bit.band(flags, wxaui.wxAUI_NB_CLOSE_ON_ACTIVE_TAB) ~= 0 then
+        nb:SetWindowStyleFlag(flags - wxaui.wxAUI_NB_CLOSE_ON_ACTIVE_TAB)
+      end
+    end)
+
   -- disallow tabs closing
   bottomnotebook:Connect(wxaui.wxEVT_COMMAND_AUINOTEBOOK_PAGE_CLOSE,
-    function (event) event:Veto() end)
+    function (event)
+      local nb = event:GetEventObject():DynamicCast("wxAuiNotebook")
+      if ide.findReplace
+      and ide.findReplace:IsPreview(nb:GetPage(nb:GetSelection())) then
+        event:Skip()
+      else
+        event:Veto()
+      end
+    end)
 
   local errorlog = ide:CreateStyledTextCtrl(bottomnotebook, wx.wxID_ANY,
     wx.wxDefaultPosition, wx.wxDefaultSize, wx.wxBORDER_NONE)
 
   errorlog:Connect(wx.wxEVT_CONTEXT_MENU,
     function (event)
-      errorlog:PopupMenu(
-        wx.wxMenu {
+      local menu = wx.wxMenu {
           { ID_UNDO, TR("&Undo") },
           { ID_REDO, TR("&Redo") },
           { },
@@ -411,7 +431,8 @@ local function createBottomNotebook(frame)
           { },
           { ID_CLEAROUTPUT, TR("C&lear Output Window") },
         }
-      )
+      PackageEventHandle("onMenuOutput", menu, errorlog, event)
+      errorlog:PopupMenu(menu)
     end)
 
   errorlog:Connect(ID_CLEAROUTPUT, wx.wxEVT_COMMAND_MENU_SELECTED,

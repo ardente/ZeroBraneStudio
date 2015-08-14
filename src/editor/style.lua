@@ -1,4 +1,4 @@
--- Copyright 2011-14 Paul Kulchenko, ZeroBrane LLC
+-- Copyright 2011-15 Paul Kulchenko, ZeroBrane LLC
 -- authors: Luxinia Dev (Eike Decker & Christoph Kubisch)
 ---------------------------------------------------------
 ----------
@@ -75,15 +75,17 @@ function StylesGetDefault()
       output = {},
       prompt = {},
       error = {},
+      searchmatchfile = {},
     },
 
     -- indicators
     indicator = {
-      fncall = {st = wxstc.wxSTC_INDIC_HIDDEN}, -- hide by default
+      fncall = {},
       varlocal = {},
       varglobal = {},
       varmasking = {},
       varmasked = {},
+      searchmatch = {},
     },
   }
 end
@@ -96,6 +98,7 @@ local markers = {
   output = {4, wxstc.wxSTC_MARK_BACKGROUND, wx.wxBLACK, wx.wxColour(240, 240, 240)},
   prompt = {5, wxstc.wxSTC_MARK_ARROWS, wx.wxBLACK, wx.wxColour(220, 220, 220)},
   error = {6, wxstc.wxSTC_MARK_BACKGROUND, wx.wxBLACK, wx.wxColour(255, 220, 220)},
+  searchmatchfile = {7, wxstc.wxSTC_MARK_EMPTY, wx.wxBLACK, wx.wxColour(196, 0, 0)},
 }
 function StylesGetMarker(marker) return unpack(markers[marker] or {}) end
 function StylesRemoveMarker(marker) markers[marker] = nil end
@@ -236,6 +239,8 @@ local specialmapping = {
   auxwindow = function(editor,style)
     if not style then return end
 
+    -- don't color toolbars as they have their own color/style
+    local skipcolor = {wxAuiToolBar = true, wxToolBar = true}
     local default = wxstc.wxSTC_STYLE_DEFAULT
     local bg = style.bg and wx.wxColour(unpack(style.bg)) or editor:StyleGetBackground(default)
     local fg = style.fg and wx.wxColour(unpack(style.fg)) or editor:StyleGetForeground(default)
@@ -253,7 +258,7 @@ local specialmapping = {
       for child = 0, children:GetCount()-1 do
         local data = children:Item(child):GetData()
         local _, window = pcall(function() return data:DynamicCast("wxWindow") end)
-        if window and panes:Item(index).name ~= 'toolbar' then
+        if window and not skipcolor[window:GetClassInfo():GetClassName()] then
           window:SetBackgroundColour(bg)
           window:SetForegroundColour(fg)
           window:Refresh()
@@ -355,16 +360,25 @@ function StylesApplyToEditor(styles,editor,font,fontitalic,lexerconvert)
     if type(styles.fncall) == 'table' and next(styles.fncall)
     and not (type(indic.fncall) == 'table' and next(indic.fncall)) then indic.fncall = styles.fncall end
 
-    editor:IndicatorSetStyle(0, indic.fncall and indic.fncall.st or ide.wxver >= "2.9.5" and wxstc.wxSTC_INDIC_ROUNDBOX or wxstc.wxSTC_INDIC_TT)
-    editor:IndicatorSetForeground(0, wx.wxColour(unpack(indic.fncall and indic.fncall.fg or {128, 128, 255})))
-    editor:IndicatorSetStyle(1, indic.varlocal and indic.varlocal.st or wxstc.wxSTC_INDIC_DOTS or wxstc.wxSTC_INDIC_TT)
-    editor:IndicatorSetForeground(1, wx.wxColour(unpack(indic.varlocal and indic.varlocal.fg or defaultfg)))
-    editor:IndicatorSetStyle(2, indic.varglobal and indic.varglobal.st or wxstc.wxSTC_INDIC_PLAIN)
-    editor:IndicatorSetForeground(2, wx.wxColour(unpack(indic.varglobal and indic.varglobal.fg or defaultfg)))
-    editor:IndicatorSetStyle(3, indic.varmasking and indic.varmasking.st or wxstc.wxSTC_INDIC_DASH or wxstc.wxSTC_INDIC_DIAGONAL)
-    editor:IndicatorSetForeground(3, wx.wxColour(unpack(indic.varmasking and indic.varmasking.fg or defaultfg)))
-    editor:IndicatorSetStyle(4, indic.varmasked and indic.varmasked.st or wxstc.wxSTC_INDIC_STRIKE)
-    editor:IndicatorSetForeground(4, wx.wxColour(unpack(indic.varmasked and indic.varmasked.fg or defaultfg)))
+    local fncall = ide:AddIndicator("core.fncall")
+    local varlocal = ide:AddIndicator("core.varlocal")
+    local varglobal = ide:AddIndicator("core.varglobal")
+    local varmasking = ide:AddIndicator("core.varmasking")
+    local varmasked = ide:AddIndicator("core.varmasked")
+    local searchmatch = ide:AddIndicator("core.searchmatch")
+
+    editor:IndicatorSetStyle(fncall, indic.fncall and indic.fncall.st or ide.wxver >= "2.9.5" and wxstc.wxSTC_INDIC_ROUNDBOX or wxstc.wxSTC_INDIC_TT)
+    editor:IndicatorSetForeground(fncall, wx.wxColour(unpack(indic.fncall and indic.fncall.fg or {128, 128, 255})))
+    editor:IndicatorSetStyle(varlocal, indic.varlocal and indic.varlocal.st or wxstc.wxSTC_INDIC_DOTS or wxstc.wxSTC_INDIC_TT)
+    editor:IndicatorSetForeground(varlocal, wx.wxColour(unpack(indic.varlocal and indic.varlocal.fg or defaultfg)))
+    editor:IndicatorSetStyle(varglobal, indic.varglobal and indic.varglobal.st or wxstc.wxSTC_INDIC_PLAIN)
+    editor:IndicatorSetForeground(varglobal, wx.wxColour(unpack(indic.varglobal and indic.varglobal.fg or defaultfg)))
+    editor:IndicatorSetStyle(varmasking, indic.varmasking and indic.varmasking.st or wxstc.wxSTC_INDIC_DASH or wxstc.wxSTC_INDIC_DIAGONAL)
+    editor:IndicatorSetForeground(varmasking, wx.wxColour(unpack(indic.varmasking and indic.varmasking.fg or defaultfg)))
+    editor:IndicatorSetStyle(varmasked, indic.varmasked and indic.varmasked.st or wxstc.wxSTC_INDIC_STRIKE)
+    editor:IndicatorSetForeground(varmasked, wx.wxColour(unpack(indic.varmasked and indic.varmasked.fg or defaultfg)))
+    editor:IndicatorSetStyle(searchmatch, indic.searchmatch and indic.searchmatch.st or wxstc.wxSTC_INDIC_BOX)
+    editor:IndicatorSetForeground(searchmatch, wx.wxColour(unpack(indic.searchmatch and indic.searchmatch.fg or {196, 0, 0})))
   end
 end
 

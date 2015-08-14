@@ -1,8 +1,8 @@
--- Copyright 2013-14 Paul Kulchenko, ZeroBrane LLC
+-- Copyright 2013-15 Paul Kulchenko, ZeroBrane LLC
 ---------------------------------------------------------
 
 local q = EscapeMagic
-local modpref = '* '
+local modpref = ide.MODPREF
 
 ide.proto.Document = {__index = {
   GetFileName = function(self) return self.fileName end,
@@ -33,7 +33,7 @@ ide.proto.Plugin = {__index = {
   GetFileName = function(self) return self.fname end,
   GetConfig = function(self) return ide.config[self.fname] or {} end,
   GetSettings = function(self) return SettingsRestorePackage(self.fname) end,
-  SetSettings = function(self, settings) SettingsSavePackage(self.fname, settings) end,
+  SetSettings = function(self, settings, opts) SettingsSavePackage(self.fname, settings, opts) end,
 }}
 
 ide.proto.Interpreter = {__index = {
@@ -57,6 +57,6 @@ ide.proto.Debugger = {__index = {
 }}
 
 ide.proto.ID = {
-  __index = function(t, id) return _G['ID_'..id] end,
-  __call = function(t, id) return IDgen(id) end,
+  __index = function(_, id) return _G['ID_'..id] end,
+  __call = function(_, id) return IDgen(id) end,
 }

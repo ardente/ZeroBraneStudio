@@ -1,4 +1,4 @@
--- Copyright 2011-14 Paul Kulchenko, ZeroBrane LLC
+-- Copyright 2011-15 Paul Kulchenko, ZeroBrane LLC
 -- authors: Lomtik Software (J. Winwood & John Labenski)
 -- Luxinia Dev (Eike Decker & Christoph Kubisch)
 ---------------------------------------------------------
@@ -318,10 +318,9 @@ errorlog:Connect(wx.wxEVT_END_PROCESS, function(event)
         -- check if editor still exists; it may not if the window is closed
         if editor then editor:SetFocus() end
       end
-      nameTab(errorlog, TR("Output"))
-
       unHideWindow(0)
       DebuggerStop(true)
+      nameTab(errorlog, TR("Output"))
       DisplayOutputLn(TR("Program completed in %.2f seconds (pid: %d).")
         :format(TimeGet() - customprocs[pid].started, pid))
       customprocs[pid] = nil

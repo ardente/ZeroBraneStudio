@@ -71,15 +71,19 @@ return {
   end,
   isincindent = function(str)
     -- remove "long" comments and escaped slashes (to process \' and \" below)
-    str = str:gsub('%-%-%[=*%[.-%]=*%]',''):gsub([[\\]],'')
+    str = str:gsub('%-%-%[=*%[.-%]=*%]',''):gsub('\\[\\\'"]','')
     while true do
       local num, sep = nil, str:match("['\"]")
       if not sep then break end
       str, num = str:gsub(sep..".-\\"..sep,sep):gsub(sep..".-"..sep,"")
       if num == 0 then break end
     end
-    -- strip comments after strings are processed and remove all function calls
-    str = str:gsub('%-%-.*',''):gsub("%b()","()")
+    str = (str
+      :gsub('%[=*%[.-%]=*%]','') -- remove long strings
+      :gsub('%[=*%[.*','') -- remove partial long strings
+      :gsub('%-%-.*','') -- strip comments after strings are processed
+      :gsub("%b()","()") -- remove all function calls
+    )
 
     local term = str:match("^%s*(%w+)%W*")
     local terminc = term and incindent[term] and 1 or 0
@@ -140,8 +144,8 @@ return {
 
     while (line <= endline) do
       local ls = editor:PositionFromLine(line)
-      local s = bit.band(editor:GetStyleAt(ls),31)
       local tx = editor:GetLine(line) --= string
+      local s = bit.band(editor:GetStyleAt(ls + #tx:match("^%s*") + 2),31)
 
       -- check for assignments
       local sep = editor.spec.sep
@@ -160,10 +164,16 @@ return {
         local var,typ = tx:match("%s*"..identifier.."%s*=%s*([^;]+)")
 
         var = var and var:gsub("local",""):gsub("%s","")
+        -- handle `require` as a special case that returns a type that matches its parameter
+        -- (this is without deeper analysis on loaded files and should work most of the time)
+        local req = typ and typ:match("^require%s*%(?%s*['\"](.+)['\"]%s*%)?")
+        typ = req or typ
         typ = (typ and typ
           :gsub("%b()","")
           :gsub("%b{}","")
           :gsub("%b[]",".0")
+          -- replace concatenation with addition to avoid misidentifying types
+          :gsub("%.%.+","+")
           -- remove comments; they may be in strings, but that's okay here
           :gsub("%-%-.*",""))
         if (typ and (typ:match(",") or typ:match("%sor%s") or typ:match("%sand%s"))) then
@@ -187,7 +197,7 @@ return {
 
         if (var and typ) then
           local class,func = typ:match(varname.."["..q(sep).."]"..varname)
-          if (assigns[typ]) then
+          if (assigns[typ] and not req) then
             assigns[var] = assigns[typ]
           elseif (func) then
             local added

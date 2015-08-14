@@ -1,11 +1,16 @@
--- Copyright 2011-14 Paul Kulchenko, ZeroBrane LLC
+-- Copyright 2011-15 Paul Kulchenko, ZeroBrane LLC
 -- authors: Luxinia Dev (Eike Decker & Christoph Kubisch)
 ---------------------------------------------------------
 
 -- put bin/ and lualibs/ first to avoid conflicts with included modules
 -- that may have other versions present somewhere else in path/cpath.
+local function isproc()
+  local file = io.open("/proc")
+  if file then file:close() end
+  return file ~= nil
+end
 local iswindows = os.getenv('WINDIR') or (os.getenv('OS') or ''):match('[Ww]indows')
-local islinux = not iswindows and not os.getenv('DYLD_LIBRARY_PATH') and io.open("/proc")
+local islinux = not iswindows and isproc()
 local arch = "x86" -- use 32bit by default
 local unpack = table.unpack or unpack
 
@@ -36,6 +41,8 @@ dofile "src/util.lua"
 -- IDE
 --
 ide = {
+  MODPREF = "* ",
+  MAXMARGIN = 4,
   config = {
     path = {
       projectdir = "",
@@ -46,7 +53,7 @@ ide = {
       checkeol = true,
       saveallonrun = false,
       caretline = true,
-      showfncall = true,
+      showfncall = false,
       autotabs = false,
       usetabs  = false,
       tabwidth = 2,
@@ -64,6 +71,7 @@ ide = {
       port = nil,
       runonstart = nil,
       redirect = nil,
+      requestattention = true,
       maxdatalength = 400,
       maxdatanum = 400,
       maxdatalevel = 3,
@@ -88,6 +96,20 @@ ide = {
     },
     commandbar = {
       prefilter = 250, -- number of records after which to apply filtering
+      maxitems = 30, -- max number of items to show
+      width = 0.35, -- <1 -- size in proportion to the app frame width; >1 -- size in pixels
+      showallsymbols = true,
+    },
+    staticanalyzer = {
+      infervalue = false, -- off by default as it's a slower mode
+    },
+    search = {
+      autocomplete = true,
+      contextlinesbefore = 2,
+      contextlinesafter = 2,
+      showaseditor = false,
+      zoom = 0,
+      autohide = false,
     },
 
     toolbar = {
@@ -112,9 +134,11 @@ ide = {
       nodynwords = true,
       ignorecase = false,
       symbols = true,
+      droprest = true,
       strategy = 2,
       width = 60,
       maxlength = 450,
+      warning = true,
     },
     arg = {}, -- command line arguments
     api = {}, -- additional APIs to load
@@ -130,6 +154,7 @@ ide = {
     projectautoopen = true,
     autorecoverinactivity = 10, -- seconds
     outlineinactivity = 0.250, -- seconds
+    symbolindexinactivity = 2, -- seconds
     filehistorylength = 20,
     projecthistorylength = 20,
     bordersize = 2,
@@ -137,8 +162,12 @@ ide = {
     singleinstance = false,
     singleinstanceport = 0xe493,
     interpreter = "luadeb",
+    showmemoryusage = false,
     hidpi = false, -- HiDPI/Retina display support
     hotexit = false,
+    -- file exclusion lists
+    excludelist = {".svn/", ".git/", ".hg/", "CVS/", "*.pyc", "*.pyo", "*.exe", "*.dll", "*.obj","*.o", "*.a", "*.lib", "*.so", "*.dylib", "*.ncb", "*.sdf", "*.suo", "*.pdb", "*.idb", ".DS_Store", "*.class", "*.psd", "*.db"},
+    binarylist = {"*.jpg", "*.jpeg", "*.png", "*.gif", "*.ttf", "*.tga", "*.dds", "*.ico", "*.eot", "*.pdf", "*.swf", "*.jar", "*.zip", ".gz", ".rar"},
   },
   specs = {
     none = {
@@ -151,6 +180,7 @@ ide = {
   packages = {},
   apis = {},
   timers = {},
+  onidle = {},
 
   proto = {}, -- prototypes for various classes
 
@@ -511,6 +541,10 @@ do
   if ide.config.language then
     LoadLuaFileExt(ide.config.messages, "cfg"..sep.."i18n"..sep..ide.config.language..".lua")
   end
+  -- always load 'en' as it's requires as a fallback for pluralization
+  if ide.config.language ~= 'en' then
+    LoadLuaFileExt(ide.config.messages, "cfg"..sep.."i18n"..sep.."en.lua")
+  end
 end
 
 loadPackages()
@@ -519,7 +553,7 @@ loadPackages()
 -- Load App
 
 for _, file in ipairs({
-    "markup", "settings", "singleinstance", "iofilters", "package",
+    "settings", "singleinstance", "iofilters", "package", "markup",
     "gui", "filetree", "output", "debugger", "outline", "commandbar",
     "editor", "findreplace", "commands", "autocomplete", "shellbox",
     "menu_file", "menu_edit", "menu_search",
@@ -559,9 +593,7 @@ do
       end
     end
   end
-
-  local notebook = ide.frame.notebook
-  if notebook:GetPageCount() == 0 then NewFile() end
+  if ide:GetEditorNotebook():GetPageCount() == 0 then NewFile() end
 end
 
 if app.postinit then app.postinit() end
@@ -595,7 +627,8 @@ local function remapkey(event)
   local keycode = event:GetKeyCode()
   local mod = event:GetModifiers()
   for id, obj in pairs(remap) do
-    if obj:FindFocus():GetId() == obj:GetId() then
+    local focus = obj:FindFocus()
+    if focus and focus:GetId() == obj:GetId() then
       local ae = wx.wxAcceleratorEntry(); ae:FromString(KSC(id))
       if ae:GetFlags() == mod and ae:GetKeyCode() == keycode then
         rerouteMenuCommand(obj, id)

@@ -1,4 +1,4 @@
--- Copyright 2011-14 Paul Kulchenko, ZeroBrane LLC
+-- Copyright 2011-15 Paul Kulchenko, ZeroBrane LLC
 -- authors: Lomtik Software (J. Winwood & John Labenski)
 -- Luxinia Dev (Eike Decker & Christoph Kubisch)
 ---------------------------------------------------------
@@ -18,8 +18,24 @@ local layoutlabel = {
 -- ----------------------------------------------------------------------------
 -- Initialize the wxConfig for loading/saving the preferences
 
-local settings = wx.wxFileConfig(GetIDEString("settingsapp"),
-  GetIDEString("settingsvendor"), ide.config.ini or "")
+local ini = ide.config.ini
+-- if ini path is relative and includes a directory name, make it relative to the IDE location
+ini = ini and (not wx.wxIsAbsolutePath(ini) and wx.wxFileName(ini):GetDirCount() > 0
+  and MergeFullPath(GetPathWithSep(ide.editorFilename), ini) or ini)
+-- check that the ini file doesn't point to a directory
+if ini and (wx.wxFileName(ini):IsDir() or wx.wxIsAbsolutePath(ini) and wx.wxDirExists(ini)) then
+  print(("Can't use 'ini' configuration setting '%s' that points to a directory instead of a file; ignored.")
+    :format(ini))
+  ini = nil
+end
+-- check that the directory is writable
+if ini and wx.wxIsAbsolutePath(ini) and not wx.wxFileName(ini):IsDirWritable() then
+  print(("Can't use 'ini' configuration setting '%s' that points to a non-writable directory; ignored.")
+    :format(ini))
+  ini = nil
+end
+
+local settings = wx.wxFileConfig(GetIDEString("settingsapp"), GetIDEString("settingsvendor"), ini or "")
 ide.settings = settings
 
 local function settingsReadSafe(settings,what,default)
@@ -252,16 +268,17 @@ function SettingsRestorePackage(package)
   return outtab
 end
 
-function SettingsSavePackage(package, values)
+function SettingsSavePackage(package, values, opts)
   local packagename = "/package/"..package
   local path = settings:GetPath()
   local mdb = require('mobdebug')
 
+  local options = {comment = false, nocode = true, sortkeys = false, compact = true}
+  for k,v in pairs(opts or {}) do options[k] = v end
+
   settings:DeleteGroup(packagename)
   settings:SetPath(packagename)
-  for k,v in pairs(values or {}) do
-    settings:Write(k, mdb.line(v, {comment = false, nocode = true}))
-  end
+  for k,v in pairs(values or {}) do settings:Write(k, mdb.line(v, options)) end
   settings:SetPath(path)
 end
 
@@ -416,7 +433,7 @@ function SettingsRestoreView()
     end
 
     -- check if debugging panes are not mentioned and float them
-    for _, name in pairs({"stackpanel", "watchpanel"}) do
+    for _, name in pairs({"stackpanel", "watchpanel", "searchpanel"}) do
       local pane = frame.uimgr:GetPane(name)
       if pane:IsOk() and not layout:find(name) then pane:Float() end
     end

@@ -1,10 +1,8 @@
--- Copyright 2011-14 Paul Kulchenko, ZeroBrane LLC
+-- Copyright 2011-15 Paul Kulchenko, ZeroBrane LLC
 -- authors: Luxinia Dev (Eike Decker & Christoph Kubisch)
 ---------------------------------------------------------
 
 local ide = ide
-local statusBar = ide.frame.statusBar
-
 local q = EscapeMagic
 
 -- api loading depends on Lua interpreter
@@ -189,7 +187,7 @@ end
 local function generateAPIInfo(only)
   for i,api in pairs(apis) do
     if ((not only) or i == only) then
-      fillTips(api,"",i)
+      fillTips(api,"")
     end
   end
 end
@@ -226,8 +224,19 @@ local function resolveAssign(editor,tx)
   local c
   if (assigns) then
     -- find assign
-    local change = true
+    local change, n, refs, stopat = true, 0, {}, os.clock() + 0.2
     while (change) do
+      -- abort the check if the auto-complete is taking too long
+      if n > 50 and os.clock() > stopat then
+        if ide.config.acandtip.warning then
+          DisplayOutputLn("Warning: Auto-complete was aborted after taking too long to complete."
+            .. " Please report this warning along with the text you were typing to support@zerobrane.com.")
+        end
+        break
+      else
+        n = n + 1
+      end
+
       local classname = nil
       c = ""
       change = false
@@ -244,7 +253,12 @@ local function resolveAssign(editor,tx)
           c = c..w..s
         end
       end
+      -- check for loops in type assignment
+      if refs[tx] then break end
+      refs[tx] = c
       tx = c
+      -- if there is any class duplication, abort the loop
+      if classname and select(2, c:gsub(classname, classname)) > 1 then break end
     end
   else
     c = tx
@@ -402,6 +416,7 @@ function DynamicWordsRem(editor,content,line,numlines)
 end
 
 function DynamicWordsRemoveAll(editor)
+  if ide.config.acandtip.nodynwords then return end
   DynamicWordsRem(editor,editor:GetText())
 end
 
@@ -513,8 +528,8 @@ function CreateAutoCompList(editor,key,pos)
 
   local tab,rest = resolveAssign(editor,key)
   local progress = tab and tab.childs
-  statusBar:SetStatusText(progress and tab.classname or "",1)
-  if not (progress) then return end
+  ide:SetStatus(progress and tab.classname and ("Auto-completing '%s'..."):format(tab.classname) or "")
+  if not progress then return end
 
   if (tab == ac) then
     local _, krest = rest:match("([%w_]+)["..q(sep).."]([%w_]*)%s*$")
@@ -526,33 +541,6 @@ function CreateAutoCompList(editor,key,pos)
     end
   else
     rest = rest:gsub("[^%w_]","")
-  end
-
-  local last = key:match("([%w_]+)%s*$")
-
-  -- build dynamic word list
-  -- only if api search couldnt descend
-  -- ie we couldnt find matching sub items
-  local dw = ""
-  if (last and #last >= (ide.config.acandtip.startat or 2)) then
-    last = last:lower()
-    if dynamicwords[last] then
-      local list = dynamicwords[last]
-      table.sort(list,function(a,b)
-          local ma,mb = a:sub(1,#last)==last, b:sub(1,#last)==last
-          if (ma and mb) or (not ma and not mb) then return a<b end
-          return ma
-        end)
-      -- ignore if word == last and sole user
-      for i,v in ipairs(list) do
-        if (v:lower() == last and dywordentries[v] == 1) then
-          table.remove(list,i)
-          break
-        end
-      end
-
-      dw = table.concat(list," ")
-    end
   end
 
   -- list from api
@@ -586,7 +574,9 @@ function CreateAutoCompList(editor,key,pos)
       if token.fpos and pos and token.fpos > pos then break end
       if token[1] == 'Id' or token[1] == 'Var' then
         local var = token.name
-        if var ~= key and var:find(key, 1, true) == 1 then
+        if var:find(key, 1, true) == 1
+        -- skip the variable formed by what's being typed
+        and (not token.fpos or not pos or token.fpos < pos-#key) then
           -- if it's a global variable, store in the auto-complete list,
           -- but if it's local, store separately as it needs to be checked
           table.insert(token.context[var] and vars or apilist, var)
@@ -599,33 +589,42 @@ function CreateAutoCompList(editor,key,pos)
     end
   end
 
-  local compstr = ""
+  -- include dynamic words
+  local last = key:match("([%w_]+)%s*$")
+  if (last and #last >= (ide.config.acandtip.startat or 2)) then
+    last = last:lower()
+    for i,v in ipairs(dynamicwords[last] or {}) do
+      -- ignore if word == last and sole user
+      if (v:lower() == last and dywordentries[v] == 1) then break end
+      table.insert(apilist, v)
+    end
+  end
+
+  local li
   if apilist then
     if (#rest > 0) then
       local strategy = ide.config.acandtip.strategy
 
       if (strategy == 2 and #apilist < 128) then
-        local pat = rest:gsub(".",function(c)
-            local l = c:lower()..c:upper()
-            return "["..l.."]([^"..l.." ]*)"
-          end)
-
-        local g = string.gsub
+        -- when matching "ret": "ret." < "re.t" < "r.et"
+        local patany = rest:gsub(".", function(c) return "["..c:lower()..c:upper().."](.-)" end)
+        local patcase = rest:gsub(".", function(c) return c.."(.-)" end)
+        local weights = {}
+        local penalty = 0.1
+        local function weight(str)
+          if not weights[str] then
+            local w = 0
+            str:gsub(patany,function(...)
+                local l = {...}
+                -- penalize gaps between matches, more so at the beginning
+                for n, v in ipairs(l) do w = w + #v * (1 + (#l-n)*penalty) end
+              end)
+            weights[str] = w + (str:find(patcase) and 0 or penalty)
+          end
+          return weights[str]
+        end
         table.sort(apilist,function(a,b)
-            local ma,mb = 0,0
-            g(a,pat,function(...)
-                local l = {...}
-                for _, v in ipairs(l) do
-                  ma = ma + ((v=="") and 0 or 1)
-                end
-              end)
-            g(b,pat,function(...)
-                local l = {...}
-                for _, v in ipairs(l) do
-                  mb = mb + ((v=="") and 0 or 1)
-                end
-              end)
-
+            local ma, mb = weight(a), weight(b)
             if (ma == mb) then return a:lower()<b:lower() end
             return ma<mb
           end)
@@ -647,11 +646,7 @@ function CreateAutoCompList(editor,key,pos)
       else prev = apilist[i] end
     end
 
-    compstr = table.concat(apilist," ")
+    li = table.concat(apilist," ")
   end
-
-  -- concat final, list complete first
-  local li = compstr .. (#compstr > 0 and #dw > 0 and " " or "") .. dw
-
-  return li ~= "" and (#li > 1024 and li:sub(1,1024).."..." or li) or nil
+  return li and #li > 1024 and li:sub(1,1024).."..." or li
 end
