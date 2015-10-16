@@ -274,7 +274,6 @@ return {
       math.pow math.rad math.random math.randomseed math.sin math.sinh math.sqrt math.tan math.tanh
       math.type math.tointeger math.maxinteger math.mininteger math.ult
       os.clock os.date os.difftime os.execute os.exit os.getenv os.remove os.rename os.setlocale os.time os.tmpname
-      package.loadlib package.searchpath package.seeall
       string.byte string.char string.dump string.find string.format string.gmatch string.gsub string.len
       string.lower string.match string.rep string.reverse string.sub string.upper
       byte find format gmatch gsub len lower match rep reverse sub upper
