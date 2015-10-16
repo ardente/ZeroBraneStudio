@@ -1,5 +1,6 @@
--- Copyright (C) Paul Kulchenko 2011-2012
+-- Copyright 2011-15 Paul Kulchenko, ZeroBrane LLC
 -- styles for comment markup
+---------------------------------------------------------
 
 local MD_MARK_ITAL = '_' -- italic
 local MD_MARK_BOLD = '**' -- bold
@@ -13,13 +14,13 @@ local MD_MARK_BOXD = '|' -- highlight
 local MD_MARK_MARK = ' ' -- separator
 local MD_LINK_NEWWINDOW = '+' -- indicator to open a new window for links
 local markup = {
-  [MD_MARK_BOXD] = {st=25, fg={127,0,127}, b=true},
-  [MD_MARK_CODE] = {st=26, fg={127,127,127}, fs=9},
-  [MD_MARK_HEAD] = {st=27, fn="Lucida Console", b=true},
-  [MD_MARK_LINK] = {st=28, u=true, hs={32,32,127}},
-  [MD_MARK_BOLD] = {st=29, b=true},
-  [MD_MARK_ITAL] = {st=30, i=true},
-  [MD_MARK_MARK] = {st=31, v=false},
+  [MD_MARK_BOXD] = {st=ide:AddIndicator("markup.boxd", 25), fg={127,0,127}, b=true},
+  [MD_MARK_CODE] = {st=ide:AddIndicator("markup.code", 26), fg={127,127,127}, fs=10},
+  [MD_MARK_HEAD] = {st=ide:AddIndicator("markup.head", 27), fn="Lucida Console", b=true},
+  [MD_MARK_LINK] = {st=ide:AddIndicator("markup.link", 28), u=true, hs={32,32,127}},
+  [MD_MARK_BOLD] = {st=ide:AddIndicator("markup.bold", 29), b=true},
+  [MD_MARK_ITAL] = {st=ide:AddIndicator("markup.ital", 30), i=true},
+  [MD_MARK_MARK] = {st=ide:AddIndicator("markup.mark", 31), v=false},
 }
 
 -- allow other editor features to recognize this special markup
@@ -31,7 +32,8 @@ function MarkupAddStyles(styles)
     local style = styles[key] or {}
     -- copy all style features by value
     for feature in pairs(value) do
-      style[feature] = style[feature] or value[feature] end
+      style[feature] = style[feature] or value[feature]
+    end
     style.fg = style.fg or comment.fg
     style.bg = style.bg or comment.bg
     styles[key] = style
@@ -60,8 +62,8 @@ function MarkupHotspotClick(pos, editor)
   local _,_,text = string.find(tx, q(MD_MARK_LINZ).."(%b"..MD_MARK_LINA..MD_MARK_LINT..")", pos)
   if text then
     text = text:gsub("^"..q(MD_MARK_LINA), ""):gsub(q(MD_MARK_LINT).."$", "")
-    local filepath = ide.openDocuments[editor:GetId()].filePath
-      or FileTreeGetDir()
+    local doc = ide:GetDocument(editor)
+    local filepath = doc and doc.filePath or FileTreeGetDir()
     local _,_,http = string.find(text, [[^(https?:%S+)$]])
     local _,_,command,code = string.find(text, [[^macro:(%w+)%((.*%S)%)$]])
     if not command then _,_,command = string.find(text, [[^macro:(%w+)$]]) end
@@ -78,7 +80,7 @@ function MarkupHotspotClick(pos, editor)
       wx.wxLaunchDefaultBrowser(http, 0)
     elseif filepath then -- only check for saved files
       -- check if requested to open in a new window
-      local newwindow = string.find(text, MD_LINK_NEWWINDOW, 1, true) -- plain search
+      local newwindow = not doc or string.find(text, MD_LINK_NEWWINDOW, 1, true)
       if newwindow then text = string.gsub(text, "^%" .. MD_LINK_NEWWINDOW, "") end
       local filename = GetFullPathIfExists(
         wx.wxFileName(filepath):GetPath(wx.wxPATH_GET_VOLUME), text)
@@ -94,6 +96,7 @@ end
 
 local function ismarkup (tx)
   local start = 1
+  local marksep = "[%s!%?%.,;:%(%)]"
   while true do
     -- find a separator first
     local st,_,sep,more = string.find(tx, "(["..MD_MARK_PTRN.."])(.)", start)
@@ -121,9 +124,9 @@ local function ismarkup (tx)
       s,e,cap = string.find(tx,"^("..qsep..nonspace..nonsep.."-"..nonspace..qsep..")", st)
       if not s then s,e,cap = string.find(tx,"^("..qsep..nonspace..qsep..")", st) end
     end
-    if s and -- selected markup is surrounded by spaces or punctuation
-      (s == start or tx:sub(s-1, s-1):match("[%s%p]")) and
-      (e-s == #tx-1 or tx:sub(e+1, e+1):match("[%s%p]"))
+    if s and -- selected markup is surrounded by spaces or punctuation marks
+      (s == 1   or tx:sub(s-1, s-1):match(marksep)) and
+      (e == #tx or tx:sub(e+1, e+1):match(marksep))
       then return s,e,cap,sep end
     start = st+1
   end

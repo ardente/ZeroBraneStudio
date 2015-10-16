@@ -21,6 +21,24 @@ ide.app.postinit = function()
     debug.sethook(function() error("exceeded") end, "", limit)
     local ok, res = pcall(func)
     debug.sethook()
+    if ok and ide:GetOutput():GetText():find("Auto-complete was aborted") then
+      ok, res = false, "Auto-complete was aborted"
+      ide:GetOutput():SetText('')
+    end
+    return ok, res
+  end
+
+  function limitdepth (limit, func)
+    local n = 0
+    debug.sethook(function(event)
+      if event == 'call' then n = n + 1
+      elseif event == 'return' or event == 'tail return' then n = n - 1
+      end
+      if n > limit then error("exceeded") end
+    end, "cr")
+    local ok, res = pcall(func)
+    n = 0
+    debug.sethook()
     return ok, res
   end
 

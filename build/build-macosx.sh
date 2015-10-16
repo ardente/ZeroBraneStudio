@@ -9,7 +9,7 @@ INSTALL_DIR="$PWD/deps"
 # Mac OS X global settings
 MACOSX_ARCH="i386"
 MACOSX_VERSION="10.6"
-MACOSX_SDK_PATH="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.6.sdk"
+MACOSX_SDK_PATH="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.7.sdk"
 
 # number of parallel jobs used for building
 MAKEFLAGS="-j4"
@@ -48,6 +48,10 @@ for ARG in "$@"; do
   case $ARG in
   5.2)
     BUILD_52=true
+    ;;
+  5.3)
+    BUILD_53=true
+    BUILD_FLAGS="$BUILD_FLAGS -DLUA_COMPAT_APIINTCASTS"
     ;;
   jit)
     BUILD_JIT=true
@@ -116,14 +120,22 @@ LUA_BASENAME="lua-5.1.5"
 if [ $BUILD_52 ]; then
   LUAV="52"
   LUAS=$LUAV
-  LUA_BASENAME="lua-5.2.2"
+  LUA_BASENAME="lua-5.2.4"
 fi
 
 LUA_FILENAME="$LUA_BASENAME.tar.gz"
 LUA_URL="http://www.lua.org/ftp/$LUA_FILENAME"
 
+if [ $BUILD_53 ]; then
+  LUAV="53"
+  LUAS=$LUAV
+  LUA_BASENAME="lua-5.3.1"
+  LUA_FILENAME="$LUA_BASENAME.tar.gz"
+  LUA_URL="http://www.lua.org/ftp/$LUA_FILENAME"
+fi
+
 if [ $BUILD_JIT ]; then
-  LUA_BASENAME="LuaJIT-2.0.2"
+  LUA_BASENAME="LuaJIT-2.0.4"
   LUA_FILENAME="$LUA_BASENAME.tar.gz"
   LUA_URL="http://luajit.org/download/$LUA_FILENAME"
 fi
@@ -136,10 +148,8 @@ if [ $BUILD_WXWIDGETS ]; then
   if [ -d $MACOSX_SDK_PATH ]; then
     MINSDK="--with-macosx-sdk=$MACOSX_SDK_PATH"
   fi
-  # fix auto-complete crash by reverting an earlier revision
-  # http://trac.wxwidgets.org/ticket/15008#comment:12
-  svn merge -r 74098:74097 .
   ./configure --prefix="$INSTALL_DIR" $WXWIDGETSDEBUG --disable-shared --enable-unicode \
+    --enable-compat28 \
     --with-libjpeg=builtin --with-libpng=builtin --with-libtiff=no --with-expat=no \
     --with-zlib=builtin --disable-richtext \
     --enable-macosx_arch=$MACOSX_ARCH --with-macosx-version-min=$MACOSX_VERSION $MINSDK \
@@ -193,6 +203,10 @@ if [ $BUILD_WXLUA ]; then
   # the following patches wxlua source to fix live coding support in wxlua apps
   # http://www.mail-archive.com/wxlua-users@lists.sourceforge.net/msg03225.html
   sed -i "" 's/\(m_wxlState = wxLuaState(wxlState.GetLuaState(), wxLUASTATE_GETSTATE|wxLUASTATE_ROOTSTATE);\)/\/\/ removed by ZBS build process \/\/ \1/' modules/wxlua/wxlcallb.cpp
+
+  # (temporary) fix for compilation issue in wxlua using wxwidgets 3.1+ (r238)
+  sed -i 's/{ "wxSTC_COFFEESCRIPT_HASHQUOTEDSTRING", wxSTC_COFFEESCRIPT_HASHQUOTEDSTRING },/\/\/ removed by ZBS build process/' modules/wxbind/src/wxstc_bind.cpp
+
   cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" -DCMAKE_BUILD_TYPE=$WXLUABUILD -DBUILD_SHARED_LIBS=FALSE \
     -DCMAKE_OSX_ARCHITECTURES=$MACOSX_ARCH -DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOSX_VERSION $MINSDK \
     -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ -DwxWidgets_CONFIG_EXECUTABLE="$INSTALL_DIR/bin/wx-config" \

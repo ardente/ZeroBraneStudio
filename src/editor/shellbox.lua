@@ -1,10 +1,9 @@
+-- Copyright 2011-15 Paul Kulchenko, ZeroBrane LLC
 -- authors: Luxinia Dev (Eike Decker & Christoph Kubisch)
 ---------------------------------------------------------
+
 local ide = ide
 local unpack = table.unpack or unpack
---
--- shellbox - a lua testbed environment within the IDE
---
 
 local bottomnotebook = ide.frame.bottomnotebook
 local out = bottomnotebook.shellbox
@@ -55,6 +54,9 @@ local function setPromptText(text)
   out:SetTargetStart(length - string.len(getPromptText()))
   out:SetTargetEnd(length)
   out:ReplaceTarget(text)
+  -- refresh the output window to force recalculation of wrapped lines;
+  -- otherwise a wrapped part of the last line may not be visible.
+  out:Update(); out:Refresh()
   out:GotoPos(out:GetLength())
 end
 
@@ -142,14 +144,29 @@ local function shellPrint(marker, ...)
     local x = select(i,...)
     text = text .. tostring(x)..(i < cnt and "\t" or "")
   end
+
+  -- split the text into smaller chunks as one large line
+  -- is difficult to handle for the editor
+  local prev, maxlength = 0, ide.config.debugger.maxdatalength
+  if #text > maxlength and not text:find("\n.") then
+    text = text:gsub("()(%s+)", function(p, s)
+        if p-prev >= maxlength then
+          prev = p
+          return "\n"
+        else
+          return s
+        end
+      end)
+  end
+
   -- add "\n" if it is missing
-  if text then text = text:gsub("\n$", "") .. "\n" end
+  text = text:gsub("\n+$", "") .. "\n"
 
   local lines = out:GetLineCount()
   local promptLine = isPrompt and getPromptLine() or nil
   local insertLineAt = isPrompt and getPromptLine() or out:GetLineCount()-1
   local insertAt = isPrompt and out:PositionFromLine(getPromptLine()) or out:GetLength()
-  out:InsertText(insertAt, text)
+  out:InsertText(insertAt, FixUTF8(text, function (s) return '\\'..string.byte(s) end))
   local linesAdded = out:GetLineCount() - lines
 
   if marker then
@@ -281,22 +298,23 @@ local function packResults(status, ...) return status, {...} end
 local function executeShellCode(tx)
   if tx == nil or tx == '' then return end
 
+  local forcelocalprefix = '^!'
+  local forcelocal = tx:find(forcelocalprefix)
+  tx = tx:gsub(forcelocalprefix, '')
+
   DisplayShellPrompt('')
 
   -- try to compile as statement
   local _, err = loadstring(tx)
   local isstatement = not err
 
-  if remotesend then remotesend(tx, isstatement); return end
+  if remotesend and not forcelocal then remotesend(tx, isstatement); return end
 
   local addedret, forceexpression = true, tx:match("^%s*=%s*")
   tx = tx:gsub("^%s*=%s*","")
   local fn
   fn, err = loadstring("return "..tx)
-  if not forceexpression and err and
-     (err:find("'?<eof>'? expected near '") or
-      err:find("'%(' expected near") or
-      err:find("unexpected symbol near '")) then
+  if not forceexpression and err then
     fn, err = loadstring(tx)
     addedret = false
   end
@@ -371,11 +389,12 @@ function ShellExecuteCode(code)
 end
 
 local function displayShellIntro()
-  DisplayShellMsg(TR("Welcome to the interactive Lua interpreter.").."\n"
-    ..TR("Enter Lua code and press Enter to run it.").." "
-    ..TR("Use Shift-Enter for multiline code.").."\n"
-    ..TR("Use 'clear' to clear the shell output and the history.").." "
-    ..TR("Prepend '=' to show complex values on multiple lines."))
+  DisplayShellMsg(TR("Welcome to the interactive Lua interpreter.").." "
+    ..TR("Enter Lua code and press Enter to run it.").."\n"
+    ..TR("Use Shift-Enter for multiline code.").."  "
+    ..TR("Use 'clear' to clear the shell output and the history.").."\n"
+    ..TR("Prepend '=' to show complex values on multiple lines.").." "
+    ..TR("Prepend '!' to force local execution."))
   DisplayShellPrompt('')
 end
 
@@ -391,8 +410,8 @@ out:Connect(wx.wxEVT_KEY_DOWN,
         -- through multiline entry
         if out:GetCurrentLine() > getPromptLine() then break end
 
-        -- if we are not on the caret line, then don't move
-        if not caretOnPromptLine() then return end
+        -- if we are not on the caret line, move normally
+        if not caretOnPromptLine() then break end
 
         local promptText = getPromptText()
         setPromptText(getNextHistoryLine(false, promptText))
@@ -403,7 +422,9 @@ out:Connect(wx.wxEVT_KEY_DOWN,
         local totalLines = out:GetLineCount()-1
         if out:GetCurrentLine() < totalLines then break end
 
+        -- if we are not on the caret line, move normally
         if not caretOnPromptLine() then break end
+
         local promptText = getPromptText()
         setPromptText(getNextHistoryLine(true, promptText))
         return
@@ -429,8 +450,6 @@ out:Connect(wx.wxEVT_KEY_DOWN,
       elseif key == wx.WXK_ESCAPE then
         setPromptText("")
         return
-      elseif key == wx.WXK_LEFT or key == wx.WXK_NUMPAD_LEFT then
-        if not caretOnPromptLine(true) then return end
       elseif key == wx.WXK_BACK then
         if not caretOnPromptLine(true) then return end
       elseif key == wx.WXK_DELETE or key == wx.WXK_NUMPAD_DELETE then
@@ -442,6 +461,7 @@ out:Connect(wx.wxEVT_KEY_DOWN,
           or key == wx.WXK_PAGEDOWN or key == wx.WXK_NUMPAD_PAGEDOWN
           or key == wx.WXK_END or key == wx.WXK_NUMPAD_END
           or key == wx.WXK_HOME or key == wx.WXK_NUMPAD_HOME
+          or key == wx.WXK_LEFT or key == wx.WXK_NUMPAD_LEFT
           or key == wx.WXK_RIGHT or key == wx.WXK_NUMPAD_RIGHT
           or key == wx.WXK_SHIFT or key == wx.WXK_CONTROL
           or key == wx.WXK_ALT then
@@ -486,7 +506,7 @@ local function inputEditable(line)
     not (out:LineFromPosition(out:GetSelectionStart()) < getPromptLine())
 end
 
--- new Scintilla changed the way markers move when the text is updated
+-- new Scintilla (3.2.1) changed the way markers move when the text is updated
 -- ticket: http://sourceforge.net/p/scintilla/bugs/939/
 -- discussion: https://groups.google.com/forum/?hl=en&fromgroups#!topic/scintilla-interest/4giFiKG4VXo
 if ide.wxver >= "2.9.5" then
@@ -523,5 +543,15 @@ out:Connect(wxstc.wxEVT_STC_DO_DROP,
       event:SetDragResult(wx.wxDragNone)
     end
   end)
+
+if ide.config.outputshell.nomousezoom then
+  -- disable zoom using mouse wheel as it triggers zooming when scrolling
+  -- on OSX with kinetic scroll and then pressing CMD.
+  out:Connect(wx.wxEVT_MOUSEWHEEL,
+    function (event)
+      if wx.wxGetKeyState(wx.WXK_CONTROL) then return end
+      event:Skip()
+    end)
+end
 
 displayShellIntro()

@@ -1,10 +1,11 @@
+-- Copyright 2011-15 Paul Kulchenko, ZeroBrane LLC
 -- authors: Lomtik Software (J. Winwood & John Labenski)
 -- Luxinia Dev (Eike Decker & Christoph Kubisch)
 ---------------------------------------------------------
+
 local ide = ide
 local frame = ide.frame
 local menuBar = frame.menuBar
-local notebook = frame.notebook
 local openDocuments = ide.openDocuments
 
 local fileMenu = wx.wxMenu({
@@ -16,15 +17,26 @@ local fileMenu = wx.wxMenu({
     { ID_SAVEAS, TR("Save &As...")..KSC(ID_SAVEAS), TR("Save the current document to a file with a new name") },
     { ID_SAVEALL, TR("Save A&ll")..KSC(ID_SAVEALL), TR("Save all open documents") },
     { },
-    -- placeholder for ID_RECENTFILES
+    -- placeholder for ID_RECENTFILES and ID_RECENTPROJECTS
     { },
     { ID_EXIT, TR("E&xit")..KSC(ID_EXIT), TR("Exit program") }})
 menuBar:Append(fileMenu, TR("&File"))
 
-local filehistorymenu = wx.wxMenu({})
+local filehistorymenu = wx.wxMenu({
+    { },
+    { ID_RECENTFILESCLEAR, TR("Clear Items")..KSC(ID_RECENTFILESCLEAR), TR("Clear items from this list") },
+})
 local filehistory = wx.wxMenuItem(fileMenu, ID_RECENTFILES,
   TR("Recent Files")..KSC(ID_RECENTFILES), TR("File history"), wx.wxITEM_NORMAL, filehistorymenu)
 fileMenu:Insert(8,filehistory)
+
+local projecthistorymenu = wx.wxMenu({
+    { },
+    { ID_RECENTPROJECTSCLEAR, TR("Clear Items")..KSC(ID_RECENTPROJECTSCLEAR), TR("Clear items from this list") },
+})
+local projecthistory = wx.wxMenuItem(fileMenu, ID_RECENTPROJECTS,
+  TR("Recent &Projects")..KSC(ID_RECENTPROJECTS), TR("Project history"), wx.wxITEM_NORMAL, projecthistorymenu)
+fileMenu:Insert(9,projecthistory)
 
 do -- recent file history
   local iscaseinsensitive = wx.wxFileName("A"):SameAs(wx.wxFileName("a"))
@@ -116,8 +128,11 @@ do -- recent file history
     end
   end
 
+  local items = 0
   updateRecentFiles = function (list)
-    local items = filehistorymenu:GetMenuItemCount()
+    -- protect against recent files menu not being present
+    if not ide:FindMenuItem(ID_RECENTFILES) then return end
+
     for i=1, #list do
       local file = list[i].filename
       local id = ID("file.recentfiles."..i)
@@ -129,13 +144,14 @@ do -- recent file history
         filehistorymenu:FindItem(id):SetItemLabel(label)
       else -- need to add an item
         local item = wx.wxMenuItem(filehistorymenu, id, label, "")
-        filehistorymenu:Append(item)
+        filehistorymenu:Insert(i-1, item)
         frame:Connect(id, wx.wxEVT_COMMAND_MENU_SELECTED, loadRecent)
       end
     end
     for i=items, #list+1, -1 do -- delete the rest if the list got shorter
       filehistorymenu:Delete(filehistorymenu:FindItemByPosition(i-1))
     end
+    items = #list -- update the number of items for the next refresh
 
     -- enable if there are any recent files
     fileMenu:Enable(ID_RECENTFILES, #list > 0)
@@ -152,18 +168,31 @@ do -- recent file history
     addFileHistory(filename)
     updateRecentFiles(filehistory)
   end
+
+  function FileRecentListUpdate(menu)
+    local list = filehistory
+    for i=#list, 1, -1 do
+      local id = ID("file.recentfiles."..i)
+      local label = list[i].filename
+      local item = wx.wxMenuItem(menu, id, label, "")
+      menu:Insert(0, item)
+      ide.frame:Connect(id, wx.wxEVT_COMMAND_MENU_SELECTED, loadRecent)
+    end
+  end
 end
 
 frame:Connect(ID_NEW, wx.wxEVT_COMMAND_MENU_SELECTED, function() return NewFile() end)
 frame:Connect(ID_OPEN, wx.wxEVT_COMMAND_MENU_SELECTED, OpenFile)
 frame:Connect(ID_SAVE, wx.wxEVT_COMMAND_MENU_SELECTED,
   function ()
-    local editor = GetEditor()
-    SaveFile(editor, openDocuments[editor:GetId()].filePath)
+    local editor = ide.findReplace:CanSave(GetEditorWithFocus()) or GetEditor()
+    local doc = ide:GetDocument(editor)
+    SaveFile(editor, doc and doc:GetFilePath() or nil)
   end)
 frame:Connect(ID_SAVE, wx.wxEVT_UPDATE_UI,
   function (event)
-    event:Enable(EditorIsModified(GetEditor()))
+    event:Enable(ide.findReplace:CanSave(GetEditorWithFocus())
+      and true or EditorIsModified(GetEditor()))
   end)
 
 frame:Connect(ID_SAVEAS, wx.wxEVT_COMMAND_MENU_SELECTED,
@@ -182,7 +211,7 @@ frame:Connect(ID_SAVEALL, wx.wxEVT_COMMAND_MENU_SELECTED,
 frame:Connect(ID_SAVEALL, wx.wxEVT_UPDATE_UI,
   function (event)
     local atLeastOneModifiedDocument = false
-    for id, document in pairs(openDocuments) do
+    for _, document in pairs(openDocuments) do
       if document.isModified or not document.filePath then
         atLeastOneModifiedDocument = true
         break
@@ -193,15 +222,44 @@ frame:Connect(ID_SAVEALL, wx.wxEVT_UPDATE_UI,
 
 frame:Connect(ID_CLOSE, wx.wxEVT_COMMAND_MENU_SELECTED,
   function (event)
-    ClosePage() -- this will find the current editor tab
+    local editor = GetEditorWithFocus()
+    local nb = ide:GetOutputNotebook()
+    local index = editor and nb:GetPageIndex(editor)
+    if index and ide.findReplace:IsPreview(editor) and index >= 0 then
+      nb:DeletePage(index) -- close preview tab
+    else
+      ClosePage() -- this will find the current editor tab
+    end
   end)
 frame:Connect(ID_CLOSE, wx.wxEVT_UPDATE_UI,
   function (event)
-    event:Enable(GetEditor() ~= nil)
+    event:Enable(ide.findReplace:IsPreview(GetEditorWithFocus()) or GetEditor() ~= nil)
   end)
 
 frame:Connect(ID_EXIT, wx.wxEVT_COMMAND_MENU_SELECTED,
   function (event)
-    if not SaveOnExit(true) then return end
     frame:Close() -- this will trigger wxEVT_CLOSE_WINDOW
+  end)
+
+frame:Connect(ID_RECENTPROJECTSCLEAR, wx.wxEVT_COMMAND_MENU_SELECTED,
+  function (event) FileTreeProjectListClear() end)
+
+frame:Connect(ID_RECENTFILESCLEAR, wx.wxEVT_COMMAND_MENU_SELECTED,
+  function (event)
+    SetFileHistory({})
+    local ed = ide:GetEditor()
+    if ed then AddToFileHistory(ide:GetDocument(ed):GetFilePath()) end
+  end)
+
+local recentprojects = 0
+frame:Connect(ID_RECENTPROJECTS, wx.wxEVT_UPDATE_UI,
+  function (event)
+    recentprojects = FileTreeProjectListUpdate(projecthistorymenu, recentprojects)
+    if not recentprojects then return end
+    local pos = 1 -- add shortcut for the previous project (if any)
+    if recentprojects > pos then
+      local item = projecthistorymenu:FindItemByPosition(pos)
+      item:SetItemLabel(item:GetItemLabelText()..KSC(ID_RECENTPROJECTSPREV))
+    end
+    event:Enable(recentprojects > 0)
   end)

@@ -9,6 +9,10 @@
 -- You can also update an existing file with new messages by running:
 --  > bin\lua.exe build/messages.lua cfg/i18n/ru.lua
 
+-- store `print` function as it's modified by wxlua and LuaJIT doesn't like
+-- what wxlua has done in that function.
+local print = print
+
 local iswindows = os.getenv('WINDIR') or (os.getenv('OS') or ''):match('[Ww]indows')
 if iswindows or not pcall(require, "wx") then
   package.cpath = (iswindows and 'bin/?.dll;' or 'bin/lib?.dylib;') .. package.cpath
@@ -50,15 +54,20 @@ end
 
 local file = ... -- pass an existing file name as a parameter
 local messages = {}
-for _, mask in ipairs({"zbstudio/*.lua", "src/main.lua", "src/editor/*.lua"}) do
+for _, mask in ipairs({"src/main.lua", "src/editor/*.lua"}) do
   for _, file in ipairs(FileSysGet(mask, wx.wxFILE)) do
     local content = FileRead(file)
     for msg in content:gmatch("[^%w]TR(%b())") do
       -- remove brackets aroung ("foo")
       -- extract message from ("foo", count)
       msg = msg:gsub("^%(", ""):gsub("%)$", ""):gsub([[(["']), .+]], "%1")
-      messages[msg] = messages[msg] or {}
-      messages[msg][file] = (messages[msg][file] or 0) + 1
+      if not msg:find([=[^["']]=]) or not msg:find([=[["']$]=]) then
+        io.stderr:write(("Call with a non-string 'TR(%s)' ignored in '%s'.\n")
+          :format(msg, file))
+      else
+        messages[msg] = messages[msg] or {}
+        messages[msg][file] = (messages[msg][file] or 0) + 1
+      end
     end
   end
 end
@@ -74,9 +83,12 @@ end
 local plural = existing[0] and ("  [0] = "..existing[0].."\n") or ""
 existing[0] = nil
 
+local en = loadfile("cfg/i18n/en.lua")() -- load 'en' with translations that require pluralization
+
 local msgs = {}
 for m, files in pairs(messages) do
-  local str = "  ["..m.."] = "..(existing[m] or 'nil, --')
+  local str = "  ["..m.."] = "
+  ..(existing[m] or (en[m:gsub([=[^['"]]=],''):gsub([=[['"]$]=],'')] and '{}, --' or 'nil, --'))
   str = str:gsub(" %-%-.*$", "").." -- "
   for f in pairs(files) do str = str .. f .. ", " end
   msgs[#msgs+1] = str:gsub(", $", "")
@@ -86,7 +98,7 @@ end
 table.sort(msgs)
 print("return {\n"..plural..table.concat(msgs, "\n").."\n}")
 if next(existing) then
-  local str = "-- no match found for the following elements: "
+  local str = "No match found for the following elements: "
   for msg in pairs(existing) do str = str .. msg .. ", " end
-  print((str:gsub(", $", "")))
+  io.stderr:write((str:gsub(", $", "\n")))
 end

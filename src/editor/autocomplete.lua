@@ -1,7 +1,9 @@
+-- Copyright 2011-15 Paul Kulchenko, ZeroBrane LLC
 -- authors: Luxinia Dev (Eike Decker & Christoph Kubisch)
 ---------------------------------------------------------
+
 local ide = ide
-local statusBar = ide.frame.statusBar
+local q = EscapeMagic
 
 -- api loading depends on Lua interpreter
 -- and loaded specs
@@ -107,9 +109,7 @@ end
 -- ToolTip and reserved words list
 -- also fixes function descriptions
 
-local tipwidth = math.max(20, ide.config.acandtip.width or 60)
-local widthmask = ("[^\n]"):rep(tipwidth-10)..("[^\n]?"):rep(10)
-local function fillTips(api,apibasename,apiname)
+local function fillTips(api,apibasename)
   local apiac = api.ac
   local tclass = api.tip
 
@@ -127,31 +127,28 @@ local function fillTips(api,apibasename,apiname)
   local shortfinfo = tclass.shortfinfo
   local shortfinfoclass = tclass.shortfinfoclass
 
-  local function traverse (tab,libname)
+  local function traverse (tab, libname, format)
     if not tab.childs then return end
+    format = tab.format or format
     for key,info in pairs(tab.childs) do
-      traverse(info,key)
+      local fullkey = (libname ~= "" and libname.."." or "")..key
+      traverse(info, fullkey, format)
+
       if info.type == "function" or info.type == "method" or info.type == "value" then
-        local libstr = libname ~= "" and libname.."." or ""
-
-        -- fix description
-        local frontname = (info.returns or "(?)").." "..libstr..key.." "..(info.args or "(?)")
-        frontname = frontname
-          :gsub("\n"," ")
-          :gsub("\t","")
-          :gsub("("..widthmask..")[ \t]([^%)])","%1\n %2")
-
-        info.description = (info.description or "")
-          :gsub("\n\n","<br>"):gsub("\n"," "):gsub("<br>","\n")
-          :gsub("[ \t]+"," ")
-          :gsub("("..widthmask..") ","%1\n")
+        local frontname = (info.returns or "(?)").." "..fullkey.." "..(info.args or "(?)")
+        frontname = frontname:gsub("\n"," "):gsub("\t","")
+        local description = info.description or ""
 
         -- build info
-        local inf = (info.type == "value" and "" or frontname.."\n")
-          ..info.description
-        local sentence = info.description:match("^(.-)%. ?\n")
-        local infshort = (info.type == "value" and "" or frontname.."\n")
-          ..(sentence and sentence.."..." or info.description)
+        local inf = ((info.type == "value" and "" or frontname.."\n")
+          ..description)
+        local sentence = description:match("^(.-)%. ?\n")
+        local infshort = ((info.type == "value" and "" or frontname.."\n")
+          ..(sentence and sentence.."..." or description))
+        if type(format) == 'function' then -- apply custom formatting if requested
+          inf = format(fullkey, info, inf)
+          infshort = format(fullkey, info, infshort)
+        end
         local infshortbatch = (info.returns and info.args) and frontname or infshort
 
         -- add to infoclass
@@ -190,12 +187,12 @@ end
 local function generateAPIInfo(only)
   for i,api in pairs(apis) do
     if ((not only) or i == only) then
-      fillTips(api,"",i)
+      fillTips(api,"")
     end
   end
 end
 
-function UpdateAssignCache(editor)
+local function updateAssignCache(editor)
   if (editor.spec.typeassigns and not editor.assignscache) then
     local assigns = editor.spec.typeassigns(editor)
     editor.assignscache = {
@@ -208,15 +205,18 @@ end
 -- assumes a tidied up string (no spaces, braces..)
 local function resolveAssign(editor,tx)
   local ac = editor.api.ac
+  local sep = editor.spec.sep
+  local anysep = "["..q(sep).."]"
   local assigns = editor.assignscache and editor.assignscache.assigns
   local function getclass(tab,a)
-    local key,rest = a:match("([%w_]+)[%.:](.*)")
+    local key,rest = a:match("([%w_]+)"..anysep.."(.*)")
     key = tonumber(key) or key -- make this work for childs[0]
     if (key and rest and tab.childs and tab.childs[key]) then
       return getclass(tab.childs[key],rest)
     end
-    if (tab.valuetype) then
-      return getclass(ac,tab.valuetype.."."..a)
+    -- process valuetype, but only if it doesn't reference the current tab
+    if (tab.valuetype and tab ~= ac.childs[tab.valuetype]) then
+      return getclass(ac,tab.valuetype..sep:sub(1,1)..a)
     end
     return tab,a
   end
@@ -224,12 +224,23 @@ local function resolveAssign(editor,tx)
   local c
   if (assigns) then
     -- find assign
-    local change = true
+    local change, n, refs, stopat = true, 0, {}, os.clock() + 0.2
     while (change) do
+      -- abort the check if the auto-complete is taking too long
+      if n > 50 and os.clock() > stopat then
+        if ide.config.acandtip.warning then
+          DisplayOutputLn("Warning: Auto-complete was aborted after taking too long to complete."
+            .. " Please report this warning along with the text you were typing to support@zerobrane.com.")
+        end
+        break
+      else
+        n = n + 1
+      end
+
       local classname = nil
       c = ""
       change = false
-      for w,s in tx:gmatch("([%w_]+)([%.:]?)") do
+      for w,s in tx:gmatch("([%w_]+)("..anysep.."?)") do
         local old = classname
         -- check if what we have so far can be matched with a class name
         -- this can happen if it's a reference to a value with a known type
@@ -242,12 +253,12 @@ local function resolveAssign(editor,tx)
           c = c..w..s
         end
       end
-      -- abort if the same or recursive value is returned; no need to continue.
-      -- this can happen after typing "smth = smth:new(); smth:" or
-      -- "line = line:gsub(...); line:" as the current algorithm attempts to
-      -- replace "line" with the value that also includes "line"
-      if change and c:find("^"..(tx:gsub("[.:]","[.:]"))) then break end
+      -- check for loops in type assignment
+      if refs[tx] then break end
+      refs[tx] = c
       tx = c
+      -- if there is any class duplication, abort the loop
+      if classname and select(2, c:gsub(classname, classname)) > 1 then break end
     end
   else
     c = tx
@@ -260,15 +271,17 @@ end
 function GetTipInfo(editor, content, short, fullmatch)
   if not content then return end
 
-  UpdateAssignCache(editor)
+  updateAssignCache(editor)
 
   -- try to resolve the class
   content = content:gsub("%b[]",".0")
-  local tab, rest = resolveAssign(editor, content)
+  local tab = resolveAssign(editor, content)
+  local sep = editor.spec.sep
+  local anysep = "["..q(sep).."]"
 
   local caller = content:match("([%w_]+)%(?%s*$")
   local class = (tab and tab.classname
-    or caller and content:match("([%w_]+)[%.:]"..caller.."%(?%s*$") or "")
+    or caller and content:match("([%w_]+)"..anysep..caller.."%(?%s*$") or "")
   local tip = editor.api.tip
 
   local classtab = short and tip.shortfinfoclass or tip.finfoclass
@@ -293,16 +306,18 @@ local function reloadAPI(only,subapis)
 end
 
 function ReloadLuaAPI()
-  local interpreterapi = ide.interpreter
-  interpreterapi = interpreterapi and interpreterapi.api
-  if (interpreterapi) then
-    local apinames = {}
-    for _, v in ipairs(interpreterapi) do
-      apinames[v] = true
-    end
-    interpreterapi = apinames
-  end
-  reloadAPI("lua",interpreterapi)
+  local interp = ide.interpreter
+  local cfgapi = ide.config.api
+  local fname = interp and interp.fname
+  local intapi = cfgapi and fname and cfgapi[fname]
+  local apinames = {}
+  -- general APIs as configured
+  for _, v in ipairs(type(cfgapi) == 'table' and cfgapi or {}) do apinames[v] = true end
+  -- interpreter-specific APIs as configured
+  for _, v in ipairs(type(intapi) == 'table' and intapi or {}) do apinames[v] = true end
+  -- interpreter APIs
+  for _, v in ipairs(interp and interp.api or {}) do apinames[v] = true end
+  reloadAPI("lua",apinames)
 end
 
 do
@@ -330,13 +345,13 @@ local function addDynamicWord (api,word)
   if api.tip.keys[word] or api.tip.staticnames[word] then return end
   local cnt = dywordentries[word]
   if cnt then
-    dywordentries[word] = cnt +1
+    dywordentries[word] = cnt + 1
     return
   end
   dywordentries[word] = 1
   local wlow = word:lower()
   for i=0,#word do
-    local k = wlow : sub (1,i)
+    local k = wlow:sub(1,i)
     dynamicwords[k] = dynamicwords[k] or {}
     table.insert(dynamicwords[k], word)
   end
@@ -380,27 +395,29 @@ local function getEditorLines(editor,line,numlines)
     editor:PositionFromLine(line),editor:PositionFromLine(line+numlines+1))
 end
 
-function DynamicWordsAdd(ev,editor,content,line,numlines)
+function DynamicWordsAdd(editor,content,line,numlines)
   if ide.config.acandtip.nodynwords then return end
   local api = editor.api
-  local content = content or getEditorLines(editor,line,numlines)
-  for word in content:gmatch "[%.:]?%s*([a-zA-Z_]+[a-zA-Z_0-9]+)" do
+  local anysep = "["..q(editor.spec.sep).."]"
+  content = content or getEditorLines(editor,line,numlines)
+  for word in content:gmatch(anysep.."?%s*([a-zA-Z_]+[a-zA-Z_0-9]+)") do
     addDynamicWord(api,word)
   end
 end
 
-function DynamicWordsRem(ev,editor,content,line,numlines)
+function DynamicWordsRem(editor,content,line,numlines)
   if ide.config.acandtip.nodynwords then return end
   local api = editor.api
-  local content = content or getEditorLines(editor,line,numlines)
-  for word in content:gmatch "[%.:]?%s*([a-zA-Z_]+[a-zA-Z_0-9]+)" do
+  local anysep = "["..q(editor.spec.sep).."]"
+  content = content or getEditorLines(editor,line,numlines)
+  for word in content:gmatch(anysep.."?%s*([a-zA-Z_]+[a-zA-Z_0-9]+)") do
     removeDynamicWord(api,word)
   end
 end
 
-function DynamicWordsRemoveAll (editor)
-  local tx = editor:GetText()
-  DynamicWordsRem("close",editor,tx)
+function DynamicWordsRemoveAll(editor)
+  if ide.config.acandtip.nodynwords then return end
+  DynamicWordsRem(editor,editor:GetText())
 end
 
 ------------
@@ -409,7 +426,6 @@ end
 local cachemain = {}
 local cachemethod = {}
 local laststrategy
-local lastmethod
 local function getAutoCompApiList(childs,fragment,method)
   fragment = fragment:lower()
   local strategy = ide.config.acandtip.strategy
@@ -430,8 +446,8 @@ local function getAutoCompApiList(childs,fragment,method)
         -- if a:b typed, then value (type == "value") not allowed
         -- if a.b typed, then method (type == "method") not allowed
         if type(v) ~= 'table' or (v.type and
-           ((method and v.type ~= "value")
-         or (not method and v.type ~= "method"))) then
+          ((method and v.type ~= "value")
+            or (not method and v.type ~= "method"))) then
           wlist = wlist..i.." "
         end
       end
@@ -452,7 +468,7 @@ local function getAutoCompApiList(childs,fragment,method)
     return ret
   end
 
-  if cache[childs] then
+  if cache[childs] and cache[childs][fragment] then
     return cache[childs][fragment]
   end
 
@@ -465,10 +481,9 @@ local function getAutoCompApiList(childs,fragment,method)
     -- if a:b typed, then value (type == "value") not allowed
     -- if a.b typed, then method (type == "method") not allowed
     if type(v) ~= 'table' or (v.type and
-       ((method and v.type ~= "value")
-     or (not method and v.type ~= "method"))) then
+      ((method and v.type ~= "value")
+        or (not method and v.type ~= "method"))) then
       local used = {}
-      --
       local kl = key:lower()
       for i=0,#key do
         local k = kl:sub(1,i)
@@ -498,31 +513,26 @@ local function getAutoCompApiList(childs,fragment,method)
   return t
 end
 
-function ClearAutoCompCache()
-  cache = {}
-end
-
--- make syntype dependent
-function CreateAutoCompList(editor,key)
+function CreateAutoCompList(editor,key,pos)
   local api = editor.api
   local tip = api.tip
   local ac = api.ac
   local sep = editor.spec.sep
 
-  local method = key:match(":[^"..sep.."]*$") ~= nil
+  local method = key:match(":[^"..q(sep).."]*$") ~= nil
 
   -- ignore keywords
   if tip.keys[key] then return end
 
-  UpdateAssignCache(editor)
+  updateAssignCache(editor)
 
   local tab,rest = resolveAssign(editor,key)
   local progress = tab and tab.childs
-  statusBar:SetStatusText(progress and tab.classname or "",1)
-  if not (progress) then return end
+  ide:SetStatusFor(progress and tab.classname and ("Auto-completing '%s'..."):format(tab.classname) or "")
+  if not progress then return end
 
   if (tab == ac) then
-    local _, krest = rest:match("([%w_]+)["..sep.."]([%w_]*)%s*$")
+    local _, krest = rest:match("([%w_]+)["..q(sep).."]([%w_]*)%s*$")
     if (krest) then
       tab = #krest >= (ide.config.acandtip.startat or 2) and tip.finfo or {}
       rest = krest:gsub("[^%w_]","")
@@ -533,40 +543,12 @@ function CreateAutoCompList(editor,key)
     rest = rest:gsub("[^%w_]","")
   end
 
-  local last = key:match("([%w_]+)%s*$")
-
-  -- build dynamic word list
-  -- only if api search couldnt descend
-  -- ie we couldnt find matching sub items
-  local dw = ""
-  if (last and #last >= (ide.config.acandtip.startat or 2)) then
-    last = last:lower()
-    if dynamicwords[last] then
-      local list = dynamicwords[last]
-      table.sort(list,function(a,b)
-          local ma,mb = a:sub(1,#last)==last, b:sub(1,#last)==last
-          if (ma and mb) or (not ma and not mb) then return a<b end
-          return ma
-        end)
-      -- ignore if word == last and sole user
-      for i,v in ipairs(list) do
-        if (v:lower() == last and dywordentries[v] == 1) then
-          table.remove(list,i)
-          break
-        end
-      end
-  
-      local res = table.concat(list," ")
-      dw = res ~= "" and " "..res or ""
-    end
-  end
-
   -- list from api
   local apilist = getAutoCompApiList(tab.childs or tab,rest,method)
 
   local function addInheritance(tab, apilist, seen)
     if not tab.inherits then return end
-    for base in tab.inherits:gmatch("[%w_"..sep.."]+") do
+    for base in tab.inherits:gmatch("[%w_"..q(sep).."]+") do
       local tab = ac
       -- map "a.b.c" to class hierarchy (a.b.c)
       for class in base:gmatch("[%w_]+") do tab = tab.childs[class] end
@@ -584,33 +566,65 @@ function CreateAutoCompList(editor,key)
   -- handle (multiple) inheritance; add matches from the parent class/lib
   addInheritance(tab, apilist, {[tab] = true})
 
-  local compstr = ""
+  -- include local/global variables
+  if ide.config.acandtip.symbols and not key:find(q(sep)) then
+    local vars, context = {}
+    local tokens = editor:GetTokenList()
+    for _, token in ipairs(tokens) do
+      if token.fpos and pos and token.fpos > pos then break end
+      if token[1] == 'Id' or token[1] == 'Var' then
+        local var = token.name
+        if var:find(key, 1, true) == 1
+        -- skip the variable formed by what's being typed
+        and (not token.fpos or not pos or token.fpos < pos-#key) then
+          -- if it's a global variable, store in the auto-complete list,
+          -- but if it's local, store separately as it needs to be checked
+          table.insert(token.context[var] and vars or apilist, var)
+        end
+        context = token.context
+      end
+    end
+    for _, var in pairs(context and vars or {}) do
+      if context[var] then table.insert(apilist, var) end
+    end
+  end
+
+  -- include dynamic words
+  local last = key:match("([%w_]+)%s*$")
+  if (last and #last >= (ide.config.acandtip.startat or 2)) then
+    last = last:lower()
+    for i,v in ipairs(dynamicwords[last] or {}) do
+      -- ignore if word == last and sole user
+      if (v:lower() == last and dywordentries[v] == 1) then break end
+      table.insert(apilist, v)
+    end
+  end
+
+  local li
   if apilist then
     if (#rest > 0) then
       local strategy = ide.config.acandtip.strategy
 
       if (strategy == 2 and #apilist < 128) then
-        local pat = rest:gsub(".",function(c)
-            local l = c:lower()..c:upper()
-            return "["..l.."]([^"..l.." ]*)"
-          end)
-
-        local g = string.gsub
+        -- when matching "ret": "ret." < "re.t" < "r.et"
+        local patany = rest:gsub(".", function(c) return "["..c:lower()..c:upper().."](.-)" end)
+        local patcase = rest:gsub(".", function(c) return c.."(.-)" end)
+        local weights = {}
+        local penalty = 0.1
+        local function weight(str)
+          if not weights[str] then
+            local w = 0
+            str:gsub(patany,function(...)
+                local l = {...}
+                -- penalize gaps between matches, more so at the beginning
+                for n, v in ipairs(l) do w = w + #v * (1 + (#l-n)*penalty) end
+              end)
+            weights[str] = w + (str:find(patcase) and 0 or penalty)
+          end
+          return weights[str]
+        end
         table.sort(apilist,function(a,b)
-            local ma,mb = 0,0
-            g(a,pat,function(...)
-                local l = {...}
-                for _, v in ipairs(l) do
-                  ma = ma + ((v=="") and 0 or 1)
-                end
-              end)
-            g(b,pat,function(...)
-                local l = {...}
-                for _, v in ipairs(l) do
-                  mb = mb + ((v=="") and 0 or 1)
-                end
-              end)
-
+            local ma, mb = weight(a), weight(b)
             if (ma == mb) then return a:lower()<b:lower() end
             return ma<mb
           end)
@@ -632,11 +646,7 @@ function CreateAutoCompList(editor,key)
       else prev = apilist[i] end
     end
 
-    compstr = table.concat(apilist," ")
+    li = table.concat(apilist," ")
   end
-
-  -- concat final, list complete first
-  local li = (compstr .. dw)
-  
-  return li ~= "" and (#li > 1024 and li:sub(1,1024).."..." or li) or nil
+  return li and #li > 1024 and li:sub(1,1024).."..." or li
 end

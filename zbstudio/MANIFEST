@@ -18,11 +18,15 @@ lualibs/lua_lexer_loose.lua
 lualibs/lua_parser_loose.lua
 lualibs/luainspect/*.lua
 lualibs/metalua/*.lua
-lualibs/metalua/metalua/*.lua
+lualibs/metalua/compiler/*.lua
+lualibs/metalua/compiler/parser/*.lua
+lualibs/metalua/compiler/parser/annot/*.lua
+lualibs/metalua/grammar/*.lua
 lualibs/mobdebug/mobdebug.lua
 lualibs/ltn12.lua
 lualibs/luadist.lua
 lualibs/mime.lua
+lualibs/sha2.lua
 lualibs/socket.lua
 lualibs/socket/*.lua
 lualibs/ssl.lua

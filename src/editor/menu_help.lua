@@ -1,5 +1,6 @@
--- author: Paul Kulchenko
+-- Copyright 2011-15 Paul Kulchenko, ZeroBrane LLC
 ---------------------------------------------------------
+
 local ide = ide
 -- ---------------------------------------------------------------------------
 -- Create the Help menu and attach the callback functions
@@ -31,8 +32,8 @@ local helpMenu = wx.wxMenu{
 -- do not translate Help menu on Mac as it won't merge with "standard" menus
 menuBar:Append(helpMenu, ide.osname == 'Macintosh' and "&Help" or TR("&Help"))
 
-local function DisplayAbout(event)
-  local logo = ide.config.path.app.."/"..GetIDEString("logo")
+local function displayAbout(event)
+  local logo = ide:GetAppName().."/"..GetIDEString("logo")
   local logoimg = wx.wxFileName(logo):FileExists() and
     ([[<tr><td><img src="%s"></td></tr>]]):format(logo) or ""
   local page = ([[
@@ -45,7 +46,7 @@ local function DisplayAbout(event)
 	  <tr>
 		<td>
 		<b>ZeroBrane Studio (%s; MobDebug %s)</b><br>
-		<b>Copyright &copy; 2011-2013 ZeroBrane LLC</b><br>
+		<b>Copyright &copy; 2011-2015 ZeroBrane LLC</b><br>
 		Paul Kulchenko<br>
 		Licensed under the MIT License.
 		</td>
@@ -57,7 +58,7 @@ local function DisplayAbout(event)
 		Christoph Kubisch, Eike Decker<br>
 		Licensed under the MIT License.
 		</td>
-		<td><img align="right" src="zbstudio/res/estrela.png"></td>
+		<td><img align="right" src="%s/res/estrela.png"></td>
 	  </tr>
 	  <tr>
 		<td>
@@ -76,7 +77,7 @@ local function DisplayAbout(event)
 	</td></tr></table>
       </body>
     </html>]])
-  :format(logoimg, ide.VERSION, mobdebug._VERSION,
+  :format(logoimg, ide.VERSION, mobdebug._VERSION, ide:GetAppName(),
     wxlua.wxLUA_VERSION_STRING, wx.wxVERSION_STRING)
 
   local dlg = wx.wxDialog(frame, wx.wxID_ANY, TR("About %s"):format(GetIDEString("editor")))
@@ -110,7 +111,7 @@ local function DisplayAbout(event)
   dlg:Destroy()
 end
 
-frame:Connect(ID_ABOUT, wx.wxEVT_COMMAND_MENU_SELECTED, DisplayAbout)
+frame:Connect(ID_ABOUT, wx.wxEVT_COMMAND_MENU_SELECTED, displayAbout)
 for item, page in pairs(urls) do
   frame:Connect(item, wx.wxEVT_COMMAND_MENU_SELECTED,
     function() wx.wxLaunchDefaultBrowser(url..page, 0) end)

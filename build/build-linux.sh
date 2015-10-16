@@ -1,12 +1,19 @@
 #!/bin/bash
 
-if [ "$(uname -m)" = "x86_64" ]; then
-  FPIC="-fpic"
-  ARCH="x64"
-else
-  FPIC=""
-  ARCH="x86"
-fi
+case "$(uname -m)" in
+	x86_64)
+		FPIC="-fpic"
+		ARCH="x64"
+		;;
+	armv7l)
+		FPIC="-fpic"
+		ARCH="armhf"
+		;;
+	*)
+		FPIC=""
+		ARCH="x86"
+		;;
+esac
 
 # ZBS binary directory
 BIN_DIR="$(dirname "$PWD")/bin/linux/$ARCH"
@@ -24,14 +31,6 @@ BUILD_FLAGS="-O2 -shared -s -I $INSTALL_DIR/include -L $INSTALL_DIR/lib $FPIC"
 WXWIDGETS_BASENAME="wxWidgets"
 WXWIDGETS_URL="http://svn.wxwidgets.org/svn/wx/wxWidgets/trunk"
 
-LIBPNG_BASENAME="libpng-1.6.2"
-LIBPNG_FILENAME="$LIBPNG_BASENAME.tar.gz"
-LIBPNG_URL="http://sourceforge.net/projects/libpng/files/libpng16/1.6.2/libpng-1.6.2.tar.gz/download"
-
-ZLIB_BASENAME="zlib-1.2.8"
-ZLIB_FILENAME="$ZLIB_BASENAME.tar.gz"
-ZLIB_URL="https://github.com/madler/zlib/archive/v1.2.8.tar.gz"
-
 WXLUA_BASENAME="wxlua"
 WXLUA_URL="https://svn.code.sf.net/p/wxlua/svn/trunk"
 
@@ -45,11 +44,19 @@ if [ $# -eq 0 ]; then
   exit 0
 fi
 
+WXLUASTRIP="/strip"
+WXWIDGETSDEBUG="--disable-debug"
+WXLUABUILD="MinSizeRel"
+
 # iterate through the command line arguments
 for ARG in "$@"; do
   case $ARG in
   5.2)
     BUILD_52=true
+    ;;
+  5.3)
+    BUILD_53=true
+    BUILD_FLAGS="$BUILD_FLAGS -DLUA_COMPAT_APIINTCASTS"
     ;;
   jit)
     BUILD_JIT=true
@@ -65,6 +72,11 @@ for ARG in "$@"; do
     ;;
   luasocket)
     BUILD_LUASOCKET=true
+    ;;
+  debug)
+    WXLUASTRIP=""
+    WXWIDGETSDEBUG="--enable-debug=max --enable-debug_gdb"
+    WXLUABUILD="Debug"
     ;;
   all)
     BUILD_WXWIDGETS=true
@@ -113,49 +125,40 @@ LUA_BASENAME="lua-5.1.5"
 if [ $BUILD_52 ]; then
   LUAV="52"
   LUAS=$LUAV
-  LUA_BASENAME="lua-5.2.2"
+  LUA_BASENAME="lua-5.2.4"
 fi
 
 LUA_FILENAME="$LUA_BASENAME.tar.gz"
 LUA_URL="http://www.lua.org/ftp/$LUA_FILENAME"
 
+if [ $BUILD_53 ]; then
+  LUAV="53"
+  LUAS=$LUAV
+  LUA_BASENAME="lua-5.3.1"
+  LUA_FILENAME="$LUA_BASENAME.tar.gz"
+  LUA_URL="http://www.lua.org/ftp/$LUA_FILENAME"
+fi
+
 if [ $BUILD_JIT ]; then
-  LUA_BASENAME="LuaJIT-2.0.2"
+  LUA_BASENAME="LuaJIT-2.0.4"
   LUA_FILENAME="$LUA_BASENAME.tar.gz"
   LUA_URL="http://luajit.org/download/$LUA_FILENAME"
 fi
 
 # build wxWidgets
 if [ $BUILD_WXWIDGETS ]; then
-  # first build get/configure libpng as v1.6 is needed
-  wget -c "$LIBPNG_URL" -O "$LIBPNG_FILENAME" || { echo "Error: failed to download libpng"; exit 1; }
-  tar -xzf "$LIBPNG_FILENAME"
-  (cd "$LIBPNG_BASENAME"; ./configure --with-libpng-prefix=wxpng_; make $MAKEFLAGS)
-
-  wget -c "$ZLIB_URL" -O "$ZLIB_FILENAME" || { echo "Error: failed to download zlib"; exit 1; }
-  tar -xzf "$ZLIB_FILENAME"
-  (cd "$ZLIB_BASENAME"; ./configure; make $MAKEFLAGS)
-
   svn co "$WXWIDGETS_URL" "$WXWIDGETS_BASENAME" || { echo "Error: failed to checkout wxWidgets"; exit 1; }
-  # replace src/png with the libpng folder
-  rm -rf "$WXWIDGETS_BASENAME/src/png"
-  mv "$LIBPNG_BASENAME" "$WXWIDGETS_BASENAME/src/png"
-
-  # replace src/zlib with the zlib folder
-  rm -rf "$WXWIDGETS_BASENAME/src/zlib"
-  mv "$ZLIB_BASENAME" "$WXWIDGETS_BASENAME/src/zlib"
 
   cd "$WXWIDGETS_BASENAME"
-  ./configure --prefix="$INSTALL_DIR" --disable-debug --disable-shared --enable-unicode \
+  ./configure --prefix="$INSTALL_DIR" $WXWIDGETSDEBUG --disable-shared --enable-unicode \
+    --enable-compat28 \
     --with-libjpeg=builtin --with-libpng=builtin --with-libtiff=no --with-expat=no \
     --with-zlib=builtin --disable-richtext --with-gtk=2 \
     CFLAGS="-Os -fPIC" CXXFLAGS="-Os -fPIC"
-  # update gzio to gzlib as this has changed between zlib 1.2.3 to 1.2.8
-  sed -i 's/gzio.c/gzlib.c/' Makefile
   make $MAKEFLAGS || { echo "Error: failed to build wxWidgets"; exit 1; }
   make install
   cd ..
-  rm -rf "$WXWIDGETS_BASENAME" "$LIBPNG_FILENAME"
+  rm -rf "$WXWIDGETS_BASENAME"
 fi
 
 # build Lua
@@ -189,13 +192,17 @@ if [ $BUILD_WXLUA ]; then
   # the following patches wxlua source to fix live coding support in wxlua apps
   # http://www.mail-archive.com/wxlua-users@lists.sourceforge.net/msg03225.html
   sed -i 's/\(m_wxlState = wxLuaState(wxlState.GetLuaState(), wxLUASTATE_GETSTATE|wxLUASTATE_ROOTSTATE);\)/\/\/ removed by ZBS build process \/\/ \1/' modules/wxlua/wxlcallb.cpp
-  cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" -DCMAKE_BUILD_TYPE=MinSizeRel -DBUILD_SHARED_LIBS=FALSE \
+
+  # (temporary) fix for compilation issue in wxlua using wxwidgets 3.1+ (r238)
+  sed -i 's/{ "wxSTC_COFFEESCRIPT_HASHQUOTEDSTRING", wxSTC_COFFEESCRIPT_HASHQUOTEDSTRING },/\/\/ removed by ZBS build process/' modules/wxbind/src/wxstc_bind.cpp
+
+  cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" -DCMAKE_BUILD_TYPE=$WXLUABUILD -DBUILD_SHARED_LIBS=FALSE \
     -DwxWidgets_CONFIG_EXECUTABLE="$INSTALL_DIR/bin/wx-config" \
     -DwxWidgets_COMPONENTS="stc;html;aui;adv;core;net;base" \
     -DwxLuaBind_COMPONENTS="stc;html;aui;adv;core;net;base" -DwxLua_LUA_LIBRARY_USE_BUILTIN=FALSE \
     -DwxLua_LUA_INCLUDE_DIR="$INSTALL_DIR/include" -DwxLua_LUA_LIBRARY="$INSTALL_DIR/lib/liblua.a" .
   (cd modules/luamodule; make $MAKEFLAGS) || { echo "Error: failed to build wxLua"; exit 1; }
-  (cd modules/luamodule; make install/strip)
+  (cd modules/luamodule; make install$WXLUASTRIP)
   [ -f "$INSTALL_DIR/lib/libwx.so" ] || { echo "Error: libwx.so isn't found"; exit 1; }
   cd ../..
   rm -rf "$WXLUA_BASENAME"

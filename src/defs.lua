@@ -59,18 +59,11 @@ style = {
   calltip = stattr,
 
   -- common special (need custom fg & bg )
-  calltipbg = nil,
   sel = nil,
   caret = nil,
   caretlinebg = nil,
   fold = nil,
   whitespace = nil,
-
-  -- special, functioncall indicator
-  fncall = {
-    fg = {r,g,b},
-    st = wxstc.wxSTC_INDIC_BOX,
-  },
 }
 
 -- config definition
@@ -79,11 +72,8 @@ style = {
 -- content is optional
 -- config is loaded into existing config table
 config = {
-  appname = "zbstudio", -- by default the launcher name
-
   path = { -- path for tools/interpreters
-    luxinia = "C:/luxbin/", -- path to luxinia exe
-    projectdir = "", -- the project directory, used by some tools/interpreters
+    lua = "C:/lua/lua.exe", -- path to lua exe
   },
   editor = {
     fontname = "Courier New", -- default font
@@ -109,6 +99,8 @@ config = {
     nomousezoom = nil, -- disable zooming using mouse wheel
     autoreload = nil, -- trigger auto-reload when file is updated
     saveallonrun = nil, -- save all modified files before Run/Debug
+    indentguide = true, -- show indentation guides
+    backspaceunindent = true, -- unindent when backspace is used
   },
 
   default = {
@@ -124,17 +116,21 @@ config = {
     runonstart = nil, -- if debugger should run immediately after starting
     -- default values are different for different interpreters
     redirect = nil, -- "d", "c", or "r" values for default, copy, or redirect
-  }
+  },
 
   outputshell = { -- output and shell settings
     fontname = "Courier New", -- default font
     fontsize = 10, -- defult size
-  }
+  },
 
   filetree = { -- filetree settings
     fontname = nil, -- no default font as it is system dependent
     fontsize = nil, -- no default size as it is system dependent
-  }
+  },
+
+  format = { -- various formatting strings
+    menurecentprojects = nil,
+  },
 
   keymap = {}, -- mapping of menu IDs to hot keys
   messages = {}, -- list of messages in a particular language
@@ -146,19 +142,21 @@ config = {
   interpreter = "luadeb", -- the default "project" lua interpreter
 
   autocomplete = true, -- whether autocomplete is on by default
-  autoanalizer = true, -- whether auto syntax analizer is on by default
+  autoanalyzer = true, -- whether auto syntax analyzer is on by default
 
   acandtip = {
     shorttip = false,   -- tooltips are compact during typing
     nodynwords = false, -- no dynamic words (user entered words)
     ignorecase = false, -- ignores case when performing comparison with autocomplete list
+    symbols = true,     -- include local/global symbols
     startat = 2,        -- start suggesting dynamic words after 2 characters
-    strategy = 0,
+    strategy = 2,
     -- 0: is string comparison
     -- 1: substring leading characters (camel case or _ separated)
     -- 2: leading + any correctly ordered fragments (default)
     width = 60, -- width of the tooltip text (in characters)
-  }
+    maxlength = 450,   -- max length of the tooltip on the screen
+  },
 
   arg = {}, -- command line arguments
 
@@ -173,7 +171,6 @@ config = {
 
   activateoutput = false, -- activate output/console on Run/Debug/Compile
   unhidewindow = false, -- to unhide a gui window
-  allowinteractivescript = false, -- allow interaction in the output window
   projectautoopen = false, -- allow auto open/close files on a project switch
   autorecoverinactivity = nil, -- period of inactivity (s) for autorecover
   hidpi = false, -- HiDPI/Retina display support
@@ -189,7 +186,7 @@ app = {
     tools = function(file) return true end,
     specs = function(file) return true end,
     interpreters = function(file) return true end,
-  }
+  },
   stringtable = { -- optional entries uses defaults otherwise
     editor = nil, statuswelcome = nil,
     -- ...
@@ -238,7 +235,7 @@ api = {
 -- ----------------------------------------------------
 -- all entries are optional
 spec = {
-  exts = {"ext","ext2",..},
+  exts = {"ext","ext2",},
   -- compatible extensions
 
   lexer = wxstc.wxSTC_LEX_LUA,
@@ -249,7 +246,7 @@ spec = {
     -- appropriate lexer id
     stringeol = {wxstc.wxSTC_LUA_STRINGEOL,},
     -- ...
-  }
+  },
 
   linecomment = "//",
   -- string for linecomments
@@ -260,7 +257,7 @@ spec = {
   -- default is "\1" which should yield no matches
   -- and therefore disable class.func type autocompletion
 
-  isfncall = function(str) return from,to end
+  isfncall = function(str) return from,to end,
   -- function that detects positions for a substring that
   -- stands for a functioncall, ie " call(..)" -> 2,5
 
@@ -322,7 +319,7 @@ debuginterface = {
 interpreter = {
   name = "",
   description = "",
-  api = {"apifile_without_extension"} -- (opt) to limit loaded lua apis
+  api = {"apifile_without_extension"}, -- (opt) to limit loaded lua apis
   frun = function(self,wfilename,withdebugger) end,
   fprojdir = function(self,wfilename) return "projpath_from_filename" end, -- (opt)
   fattachdebug = function(self) end, -- (opt)

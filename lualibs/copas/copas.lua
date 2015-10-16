@@ -18,7 +18,7 @@ if package.loaded["socket.http"] then
 end
 
 local socket = require "socket"
-
+local gettime = socket.gettime
 local coxpcall = require "coxpcall"
 
 local WATCH_DOG_TIMEOUT = 120
@@ -60,7 +60,7 @@ local copas = {}
 -- Meta information is public even if beginning with an "_"
 copas._COPYRIGHT   = "Copyright (C) 2005-2010 Kepler Project"
 copas._DESCRIPTION = "Coroutine Oriented Portable Asynchronous Services"
-copas._VERSION     = "Copas 1.1.7"
+copas._VERSION     = "Copas 1.2.1"
 
 -- Close the socket associated with the current connection after the handler finishes
 copas.autoclose = true
@@ -117,6 +117,65 @@ local function newset()
   return set
 end
 
+local fnil = function()end
+local _sleeping = {
+    times = {},  -- list with wake-up times
+    cos = {},    -- list with coroutines, index matches the 'times' list
+    lethargy = {}, -- list of coroutines sleeping without a wakeup time
+
+    insert = fnil,
+    remove = fnil,
+    push = function(self, sleeptime, co)
+        if not co then return end
+        if sleeptime<0 then
+            --sleep until explicit wakeup through copas.wakeup
+            self.lethargy[co] = true
+            return
+        else
+            sleeptime = gettime() + sleeptime
+        end
+        local t, c = self.times, self.cos
+        local i, cou = 1, #t
+        --TODO: do a binary search
+        while i<=cou and t[i]<=sleeptime do i=i+1 end
+        table.insert(t, i, sleeptime)
+        table.insert(c, i, co)
+    end,
+    getnext = function(self)  -- returns delay until next sleep expires, or nil if there is none
+        local t = self.times
+        local delay = t[1] and t[1] - gettime() or nil
+
+        return delay and math.max(delay, 0) or nil
+    end,
+    -- find the thread that should wake up to the time
+    pop = function(self, time)
+        local t, c = self.times, self.cos
+        if #t==0 or time<t[1] then return end
+        local co = c[1]
+        table.remove(t, 1)
+        table.remove(c, 1)
+        return co
+    end,
+    wakeup = function(self, co)
+        local let = self.lethargy
+        if let[co] then
+            self:push(0, co)
+            let[co] = nil
+        else
+            let = self.cos
+            for i=1,#let do
+                if let[i]==co then
+                    table.remove(let, i)
+                    local tm = self.times[i]
+                    table.remove(self.times, i)
+                    self:push(0, co)
+                    return
+                end
+            end
+        end
+    end
+} --_sleeping
+
 local _servers = newset() -- servers being handled
 local _reading_log = {}
 local _writing_log = {}
@@ -140,7 +199,7 @@ function copas.receive(client, pattern, part)
       _reading_log[client] = nil
       return s, err, part
     end
-    _reading_log[client] = os.time()
+    _reading_log[client] = gettime()
     coroutine.yield(client, _reading)
   until false
 end
@@ -156,26 +215,26 @@ function copas.receivefrom(client, size)
       _reading_log[client] = nil
       return s, err, port
     end
-    _reading_log[client] = os.time()
+    _reading_log[client] = gettime()
     coroutine.yield(client, _reading)
   until false
 end
 
 -- same as above but with special treatment when reading chunks,
 -- unblocks on any data received.
-function copas.receivePartial(client, pattern)
-  local s, err, part
+function copas.receivePartial(client, pattern, part)
+  local s, err
   pattern = pattern or "*l"
   repeat
-    s, err, part = client:receive(pattern)
+    s, err, part = client:receive(pattern, part)
     if s or ( (type(pattern)=="number") and part~="" and part ~=nil ) or
-    err ~= "timeout" then
-    _reading_log[client] = nil
-    return s, err, part
-  end
-  _reading_log[client] = os.time()
-  coroutine.yield(client, _reading)
-until false
+      err ~= "timeout" then
+      _reading_log[client] = nil
+      return s, err, part
+    end
+    _reading_log[client] = gettime()
+    coroutine.yield(client, _reading)
+  until false
 end
 
 -- sends data to a client. The operation is buffered and
@@ -191,14 +250,14 @@ function copas.send(client, data, from, to)
     -- adds extra corrotine swap
     -- garantees that high throuput dont take other threads to starvation
     if (math.random(100) > 90) then
-      _writing_log[client] = os.time()
+      _writing_log[client] = gettime()
       coroutine.yield(client, _writing)
     end
     if s or err ~= "timeout" then
       _writing_log[client] = nil
       return s, err,lastIndex
     end
-    _writing_log[client] = os.time()
+    _writing_log[client] = gettime()
     coroutine.yield(client, _writing)
   until false
 end
@@ -213,14 +272,14 @@ function copas.sendto(client, data, ip, port)
     -- adds extra corrotine swap
     -- garantees that high throuput dont take other threads to starvation
     if (math.random(100) > 90) then
-      _writing_log[client] = os.time()
+      _writing_log[client] = gettime()
       coroutine.yield(client, _writing)
     end
     if s or err ~= "timeout" then
       _writing_log[client] = nil
       return s, err
     end
-    _writing_log[client] = os.time()
+    _writing_log[client] = gettime()
     coroutine.yield(client, _writing)
   until false
 end
@@ -235,7 +294,7 @@ function copas.connect(skt, host, port)
       _writing_log[skt] = nil
       return ret, err
     end
-    _writing_log[skt] = os.time()
+    _writing_log[skt] = gettime()
     coroutine.yield(skt, _writing)
   until false
   return ret, err
@@ -251,11 +310,11 @@ local _skt_mt = {__index = {
                             return copas.send (self.socket, data, from, to)
                           end,
 
-                   receive = function (self, pattern)
+                   receive = function (self, pattern, prefix)
                                if (self.timeout==0) then
-                                 return copas.receivePartial(self.socket, pattern)
+                                 return copas.receivePartial(self.socket, pattern, prefix)
                                end
-                               return copas.receive(self.socket, pattern)
+                               return copas.receive(self.socket, pattern, prefix)
                              end,
 
                    flush = function (self)
@@ -264,8 +323,12 @@ local _skt_mt = {__index = {
 
                    settimeout = function (self,time)
                                   self.timeout=time
-                                  return
+                                  return true
                                 end,
+
+                   skip = function(self, ...) return self.socket:skip(...) end,
+
+                   close = function(self, ...) return self.socket:close(...) end,
                }}
 
 -- wraps a UDP socket, copy of TCP one adapted for UDP.
@@ -293,7 +356,7 @@ local _skt_mt_udp = {__index = {
 
                    settimeout = function (self,time)
                                   self.timeout=time
-                                  return
+                                  return true
                                 end,
                }}
 
@@ -385,6 +448,13 @@ function copas.addserver(server, handler, timeout)
         addTCPserver(server, handler, timeout)
     end
 end
+
+function copas.removeserver(server)
+  _servers[server] = nil
+  _reading:remove(server)
+  return server:close()
+end
+
 -------------------------------------------------------------------------------
 -- Adds an new courotine thread to Copas dispatcher
 -------------------------------------------------------------------------------
@@ -464,6 +534,24 @@ local _writable_t = {
 }
 
 addtaskWrite (_writable_t)
+--
+--sleeping threads task
+local _sleeping_t = {
+    tick = function (self, time, ...)
+       _doTick(_sleeping:pop(time), ...)
+    end
+}
+
+-- yields the current coroutine and wakes it after 'sleeptime' seconds.
+-- If sleeptime<0 then it sleeps until explicitly woken up using 'wakeup'
+function copas.sleep(sleeptime)
+    coroutine.yield((sleeptime or 0), _sleeping)
+end
+
+-- Wakes up a sleeping coroutine 'co'.
+function copas.wakeup(co)
+    _sleeping:wakeup(co)
+end
 
 local last_cleansing = 0
 
@@ -472,8 +560,8 @@ local last_cleansing = 0
 -------------------------------------------------------------------------------
 local function _select (timeout)
   local err
-  local now = os.time()
-  local duration = os.difftime
+  local now = gettime()
+  local duration = function(t2, t1) return t2-t1 end
 
   _readable_t._evs, _writable_t._evs, err = socket.select(_reading, _writing, timeout)
   local r_evs, w_evs = _readable_t._evs, _writable_t._evs
@@ -512,6 +600,14 @@ end
 -- handled (or nil + error message)
 -------------------------------------------------------------------------------
 function copas.step(timeout)
+  _sleeping_t:tick(gettime())
+
+  -- Need to wake up the select call it time for the next sleeping event
+  local nextwait = _sleeping:getnext()
+  if nextwait then
+    timeout = timeout and math.min(nextwait, timeout) or nextwait
+  end
+
   local err = _select (timeout)
   if err == "timeout" then return false end
 

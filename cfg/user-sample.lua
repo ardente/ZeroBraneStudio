@@ -9,15 +9,15 @@ See [configuration](http://studio.zerobrane.com/doc-configuration.html) page for
 
 --]]--
 
--- an example of how loaded configuration can be modified from this file
+-- to modify loaded configuration for recognized extensions for lua files
 local G = ... -- this now points to the global environment in the script
 local luaspec = G.ide.specs['lua']
 luaspec.exts[#luaspec.exts+1] = "luaz"
 luaspec.keywords[1] = luaspec.keywords[1] .. ' foo'
 
 -- to modify a key mapping; see the full list of IDs in src/editor/keymap.lua
-local G = ...
-keymap[G.ID_STARTDEBUG] = "Ctrl-Shift-D"
+-- starting from v0.95, ID.<menuid> can be used instead of G.ID_<menuid>
+keymap[ID.STARTDEBUG] = "Ctrl-Shift-D"
 
 -- to change font size to 12
 editor.fontsize = 12 -- this is mapped to ide.config.editor.fontsize
@@ -112,8 +112,8 @@ styles.indicator.fncall.st = wxstc.wxSTC_INDIC_PLAIN
   wxSTC_INDIC_HIDDEN No visual effect;
   --]]
 
--- to enable additional spec files (like spec/cpp.lua)
-load.specs(function(file) return file:find('spec[/\\]cpp%.lua$') end)
+-- to enable additional spec files (like spec/glsl.lua)
+load.specs(function(file) return file:find('spec[/\\]glsl%.lua$') end)
 
 -- to specify a default EOL encoding to be used for new files:
 -- `wxstc.wxSTC_EOL_CRLF` or `wxstc.wxSTC_EOL_LF`;
@@ -140,3 +140,25 @@ editor.nomousezoom = true
 -- you can also change it between runs from Local Console by executing
 -- `ide.config.corona = {skin = 'iPad'}`
 corona = { skin = "iPad" }
+
+-- to style individual keywords; `return` and `break` are shown in red
+local G = ... -- this now points to the global environment in the script
+local luaspec = G.ide.specs.lua
+
+local num = #luaspec.keywords
+-- take a new slot in the list of keywords (starting from 1)
+luaspec.keywords[num+1] = 'return break'
+-- remove 'return' from the list of "regular" keywords
+luaspec.keywords[1] = luaspec.keywords[1]:gsub(' return', ''):gsub(' break', '')
+
+-- assign new style to the added slot (starting from 0)
+styles["keywords"..num] = {fg = {240, 0, 0}, b = true}
+
+-- enable `Opt+Shift+Left/Right` shortcut on OSX
+editor.keymap[#editor.keymap+1] = {wxstc.wxSTC_KEY_LEFT, wxstc.wxSTC_SCMOD_ALT+wxstc.wxSTC_SCMOD_SHIFT, wxstc.wxSTC_CMD_WORDLEFTEXTEND, "Macintosh"}
+editor.keymap[#editor.keymap+1] = {wxstc.wxSTC_KEY_RIGHT, wxstc.wxSTC_SCMOD_ALT+wxstc.wxSTC_SCMOD_SHIFT, wxstc.wxSTC_CMD_WORDRIGHTENDEXTEND, "Macintosh"}
+
+-- enable Emacs bindings to use `Ctrl-A` and `Ctrl-E` to go to the line start/end
+editor.keymap[#editor.keymap+1] = {('A'):byte(), wxstc.wxSTC_SCMOD_CTRL, wxstc.wxSTC_CMD_HOME}
+editor.keymap[#editor.keymap+1] = {('E'):byte(), wxstc.wxSTC_SCMOD_CTRL, wxstc.wxSTC_CMD_LINEEND}
+keymap[ID.SELECTALL] = nil -- remove `Ctrl-A` shortcut from `SelectAll`
