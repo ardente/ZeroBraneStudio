@@ -1,11 +1,8 @@
--- Copyright 2011-15 Paul Kulchenko, ZeroBrane LLC
+-- Copyright 2011-17 Paul Kulchenko, ZeroBrane LLC
 -- authors: Lomtik Software (J. Winwood & John Labenski)
 -- Luxinia Dev (Eike Decker & Christoph Kubisch)
 -- David Manura
 ---------------------------------------------------------
-
--- Equivalent to C's "cond ? a : b", all terms will be evaluated
-function iff(cond, a, b) if cond then return a else return b end end
 
 function EscapeMagic(s) return s:gsub('([%(%)%.%%%+%-%*%?%[%^%$%]])','%%%1') end
 
@@ -16,78 +13,6 @@ end
 do
   local sep = GetPathSeparator()
   function IsDirectory(dir) return dir:find(sep.."$") end
-end
-
-function StripCommentsC(tx)
-  local out = ""
-  local lastc = ""
-  local skip
-  local skipline
-  local skipmulti
-  local tx = string.gsub(tx, "\r\n", "\n")
-  for c in tx:gmatch(".") do
-    local oc = c
-    local tu = lastc..c
-    skip = c == '/'
-
-    if ( not (skipmulti or skipline)) then
-      if (tu == "//") then
-        skipline = true
-      elseif (tu == "/*") then
-        skipmulti = true
-        c = ""
-      elseif (lastc == '/') then
-        oc = tu
-      end
-    elseif (skipmulti and tu == "*/") then
-      skipmulti = false
-      c = ""
-    elseif (skipline and lastc == "\n") then
-      out = out.."\n"
-      skipline = false
-    end
-
-    lastc = c
-    if (not (skip or skipline or skipmulti)) then
-      out = out..oc
-    end
-  end
-
-  return out..lastc
-end
-
--- http://lua-users.org/wiki/EnhancedFileLines
-function FileLines(f)
-  local CHUNK_SIZE = 1024
-  local buffer = ""
-  local pos_beg = 1
-  return function()
-    local pos, chars
-    while 1 do
-      pos, chars = buffer:match('()([\r\n].)', pos_beg)
-      if pos or not f then
-        break
-      elseif f then
-        local chunk = f:read(CHUNK_SIZE)
-        if chunk then
-          buffer = buffer:sub(pos_beg) .. chunk
-          pos_beg = 1
-        else
-          f = nil
-        end
-      end
-    end
-    if not pos then
-      pos = #buffer
-    elseif chars == '\r\n' then
-      pos = pos + 1
-    end
-    local line = buffer:sub(pos_beg, pos)
-    pos_beg = pos + 1
-    if #line > 0 then
-      return line
-    end
-  end
 end
 
 function PrependStringToArray(t, s, maxstrings, issame)
@@ -140,33 +65,43 @@ end
 
 function FileSysGetRecursive(path, recursive, spec, opts)
   local content = {}
+  local showhidden = ide.config and ide.config.showhiddenfiles
   local sep = GetPathSeparator()
+  -- trip trailing separator and adjust the separator in the path
+  path = path:gsub("[\\/]$",""):gsub("[\\/]", sep)
   local queue = {path}
-  local pathpatt = "^"..EscapeMagic(path)
+  local pathpatt = "^"..EscapeMagic(path)..sep.."?"
   local optyield = (opts or {}).yield
   local optfolder = (opts or {}).folder ~= false
   local optsort = (opts or {}).sort ~= false
   local optpath = (opts or {}).path ~= false
   local optskipbinary = (opts or {}).skipbinary
   local optondirectory = (opts or {}).ondirectory
+  local optmaxnum = tonumber((opts or {}).maxnum)
 
-  local function spec2list(spec, list)
+  local function spec2list(spect, list)
     -- return empty list if no spec is provided
-    if spec == nil or spec == "*" or spec == "*.*" then return {}, 0 end
+    if spect == nil or spect == "*" or spect == "*.*" then return {}, 0 end
     -- accept "*.lua" and "*.txt,*.wlua" combinations
-    if type(spec) == 'table' then spec = table.concat(spec, ",") end
     local masknum, list = 0, list or {}
-    for m in spec:gmatch("[^%s;,]+") do
-      m = m:gsub("[\\/]", sep)
-      if m:find("^%*%.%w+"..sep.."?$") then
-        list[m:sub(2)] = true
-      else
-        -- escape all special characters
-        -- and replace (escaped) ** with .* and (escaped) * with [^\//]*
-        table.insert(list, EscapeMagic(m)
-          :gsub("%%%*%%%*", ".*"):gsub("%%%*", "[^/\\]*").."$")
+    for spec, specopt in pairs(type(spect) == 'table' and spect or {spect}) do
+      -- specs can be kept as `{[spec] = true}` or `{spec}`, so handle both cases
+      if type(spec) == "number" then spec = specopt end
+      if specopt == false then spec = "" end -- skip keys with `false` values
+      for m in spec:gmatch("[^%s;,]+") do
+        m = m:gsub("[\\/]", sep)
+        if m:find("^%*%.%w+"..sep.."?$") then
+          list[m:sub(2)] = true
+        else
+          -- escape all special characters
+          table.insert(list, EscapeMagic(m)
+            :gsub("%%%*%%%*", ".*") -- replace (escaped) ** with .*
+            :gsub("%%%*", "[^/\\]*") -- replace (escaped) * with [^\//]*
+            :gsub("^"..sep, ide:GetProject() or "") -- replace leading separator with project directory (if set)
+            .."$")
+        end
+        masknum = masknum + 1
       end
-      masknum = masknum + 1
     end
     return list, masknum
   end
@@ -207,47 +142,68 @@ function FileSysGetRecursive(path, recursive, spec, opts)
   end
 
   local dir = wx.wxDir()
+  local num = 0
   local function getDir(path)
     dir:Open(path)
     if not dir:IsOpened() then
-      if DisplayOutputLn and TR then
-        DisplayOutputLn(TR("Can't open '%s': %s"):format(path, wx.wxSysErrorMsg()))
-      end
-      return
+      if TR then ide:Print(TR("Can't open '%s': %s"):format(path, wx.wxSysErrorMsg())) end
+      return true -- report and continue
     end
 
     -- recursion is done in all folders if requested,
     -- but only those folders that match the spec are returned
     local _ = wx.wxLogNull() -- disable error reporting; will report as needed
-    local found, file = dir:GetFirst("*", wx.wxDIR_DIRS)
+    local found, file = dir:GetFirst("*",
+      wx.wxDIR_DIRS + ((showhidden == true or showhidden == wx.wxDIR_DIRS) and wx.wxDIR_HIDDEN or 0))
     while found do
-      local fname = wx.wxFileName(path, file):GetFullPath()
+      local fname = path..sep..file
       if optfolder and ismatch(fname..sep, inmasks, exmasks) then
         report((optpath and fname or fname:gsub(pathpatt, ""))..sep)
       end
 
-      if recursive and ismatch(fname..sep, nil, exmasks)
-      and (not optondirectory or optondirectory(fname) ~= false)
+      -- `optondirectory` may return:
+      -- `true` to traverse the directory and continue
+      -- `false` to skip the directory and continue
+      -- `nil` to abort the process
+      local ondirectory = optondirectory and optondirectory(fname)
+      if optondirectory and ondirectory == nil then return false end
+
+      if recursive and ismatch(fname..sep, nil, exmasks) and (ondirectory ~= false)
       -- check if this name already appears in the path earlier;
       -- Skip the processing if it does as it could lead to infinite
       -- recursion with circular references created by symlinks.
       and select(2, fname:gsub(EscapeMagic(file..sep),'')) <= 2 then
         table.insert(queue, fname)
       end
+
+      num = num + 1
+      if optmaxnum and num >= optmaxnum then return false end
+
       found, file = dir:GetNext()
     end
-    found, file = dir:GetFirst(spec or "*", wx.wxDIR_FILES)
+    found, file = dir:GetFirst(spec or "*",
+      wx.wxDIR_FILES + ((showhidden == true or showhidden == wx.wxDIR_FILES) and wx.wxDIR_HIDDEN or 0))
     while found do
-      local fname = wx.wxFileName(path, file):GetFullPath()
+      local fname = path..sep..file
       if ismatch(fname, inmasks, exmasks) then
         report(optpath and fname or fname:gsub(pathpatt, ""))
       end
+
+      num = num + 1
+      if optmaxnum and num >= optmaxnum then return false end
+
       found, file = dir:GetNext()
     end
+    -- wxlua < 3.1 doesn't provide Close method for the directory, so check for it
+    if ide:IsValidProperty(dir, "Close") then dir:Close() end
+    return true
   end
-  while #queue > 0 do getDir(table.remove(queue)) end
+  while #queue > 0 and getDir(table.remove(queue)) do end
 
-  if optyield then return end
+  if optyield then
+    if #queue > 0 then coroutine.yield(false) end -- signal aborted processing
+    return
+  end
 
   if optsort then
     local prefix = '\001' -- prefix to sort directories first
@@ -262,25 +218,57 @@ function FileSysGetRecursive(path, recursive, spec, opts)
 end
 
 local normalflags = wx.wxPATH_NORM_ABSOLUTE + wx.wxPATH_NORM_DOTS + wx.wxPATH_NORM_TILDE
-function GetFullPathIfExists(p, f)
-  if not p or not f then return end
-  local file = wx.wxFileName(f)
-  -- Normalize call is needed to make the case of p = '/abc/def' and
-  -- f = 'xyz/main.lua' work correctly. Normalize() returns true if done.
-  return (file:Normalize(normalflags, p)
-    and file:FileExists()
-    and file:GetFullPath()
-    or nil)
-end
-
 function MergeFullPath(p, f)
   if not p or not f then return end
   local file = wx.wxFileName(f)
   -- Normalize call is needed to make the case of p = '/abc/def' and
   -- f = 'xyz/main.lua' work correctly. Normalize() returns true if done.
+  -- Normalization with PATH_NORM_DOTS removes leading dots, which need to be added back.
+  -- This allows things like `-cfg ../myconfig.lua` to work.
+  local rel, rest = p:match("^(%.[/\\.]*[/\\])(.*)")
+  if rel and rest then p = rest end
   return (file:Normalize(normalflags, p)
-    and file:GetFullPath()
+    and (rel or ""):gsub("[/\\]", GetPathSeparator())..file:GetFullPath()
     or nil)
+end
+
+function FileNormalizePath(path)
+  local filePath = wx.wxFileName(path)
+  filePath:Normalize()
+  filePath:SetVolume(filePath:GetVolume():upper())
+  return filePath:GetFullPath()
+end
+
+function FileGetLongPath(path)
+  local fn = wx.wxFileName(path)
+  local vol = fn:GetVolume():upper()
+  local volsep = vol and vol:byte() and wx.wxFileName.GetVolumeSeparator(vol:byte()-("A"):byte()+1)
+  local dir = wx.wxDir()
+  local dirs = fn:GetDirs()
+  table.insert(dirs, fn:GetFullName())
+  local normalized = vol and volsep and vol..volsep or (path:match("^[/\\]") or ".")
+  local hasclose = ide:IsValidProperty(dir, "Close")
+  while #dirs > 0 do
+    dir:Open(normalized)
+    if not dir:IsOpened() then return path end
+    local p = table.remove(dirs, 1)
+    local ok, segment = dir:GetFirst(p)
+    if not ok then return path end
+    normalized = MergeFullPath(normalized,segment)
+    if hasclose then dir:Close() end
+  end
+  local file = wx.wxFileName(normalized)
+  file:Normalize(wx.wxPATH_NORM_DOTS) -- remove leading dots, if any
+  return file:GetFullPath()
+end
+
+function CreateFullPath(path)
+  local ok = wx.wxFileName.Mkdir(path, tonumber(755,8), wx.wxPATH_MKDIR_FULL)
+  return ok, not ok and wx.wxSysErrorMsg() or nil
+end
+function GetFullPathIfExists(p, f)
+  local path = MergeFullPath(p, f)
+  return path and wx.wxFileExists(path) and path or nil
 end
 
 function FileWrite(file, content)
@@ -324,17 +312,26 @@ function FileRead(fname, length, callback)
     while true do
       local len, content = file:Read(length)
       local res, msg = callback(content) -- may return `false` to signal to stop
-      if res == false then return false, msg or "Unknown error" end
+      if res == false then
+        file:Close()
+        return false, msg or "Unknown error"
+      end
       if len < length then break end
       pos = pos + len
       file:Seek(pos)
     end
+    file:Close()
     return true, wx.wxSysErrorMsg()
   end
 
   local _, content = file:Read(length or FileSize(fname))
   file:Close()
   return content, wx.wxSysErrorMsg()
+end
+
+function FileRemove(file)
+  local _ = wx.wxLogNull() -- disable error reporting; will report as needed
+  return wx.wxRemoveFile(file), wx.wxSysErrorMsg()
 end
 
 function FileRename(file1, file2)
@@ -346,9 +343,6 @@ function FileCopy(file1, file2)
   local _ = wx.wxLogNull() -- disable error reporting; will report as needed
   return wx.wxCopyFile(file1, file2), wx.wxSysErrorMsg()
 end
-
-local ok, socket = pcall(require, "socket")
-TimeGet = ok and socket.gettime or os.clock
 
 function IsBinary(text) return text:find("[^\7\8\9\10\12\13\27\32-\255]") and true or false end
 
@@ -379,6 +373,7 @@ function FixUTF8(s, repl)
         or s:find("^[\241-\243][\128-\191][\128-\191][\128-\191]", p)
         or s:find(       "^\244[\128-\143][\128-\191][\128-\191]", p) then p = p + 4
     else
+      if not repl then return end -- just signal invalid UTF8 string
       local repl = type(repl) == 'function' and repl(s:sub(p,p)) or repl
       s = s:sub(1, p-1)..repl..s:sub(p+1)
       table.insert(invalid, p)
@@ -390,40 +385,8 @@ function FixUTF8(s, repl)
   return s, invalid
 end
 
-function RequestAttention()
-  local frame = ide.frame
-  if not frame:IsActive() then
-    frame:RequestUserAttention()
-    if ide.osname == "Macintosh" then
-      local cmd = [[osascript -e 'tell application "%s" to activate']]
-      wx.wxExecute(cmd:format(ide.editorApp:GetAppName()), wx.wxEXEC_ASYNC)
-    elseif ide.osname == "Windows" then
-      if frame:IsIconized() then frame:Iconize(false) end
-      frame:Raise() -- raise the window
-
-      local winapi = require 'winapi'
-      if winapi then
-        local pid = winapi.get_current_pid()
-        local wins = winapi.find_all_windows(function(w)
-          return w:get_process():get_pid() == pid
-             and w:get_class_name() == 'wxWindowNR'
-        end)
-        if wins and #wins > 0 then
-          -- found the window, now need to activate it:
-          -- send some input to the window and then
-          -- bring our window to foreground (doesn't work without some input)
-          -- send Attn key twice (down and up)
-          winapi.send_to_window(0xF6, false)
-          winapi.send_to_window(0xF6, true)
-          for _, w in ipairs(wins) do w:set_foreground() end
-        end
-      end
-    end
-  end
-end
-
 function TR(msg, count)
-  local messages = ide.config.messages
+  local messages = ide.messages
   local lang = ide.config.language
   local counter = messages[lang] and messages[lang][0]
   local message = messages[lang] and messages[lang][msg]
@@ -463,9 +426,8 @@ end
 
 function LoadLuaFileExt(tab, file, proto)
   local cfgfn,err = loadfile(file)
-  local report = DisplayOutputLn or print
   if not cfgfn then
-    report(("Error while loading file: '%s'."):format(err))
+    ide:Print(("Error while loading file: '%s'."):format(err))
   else
     local name = file:match("([a-zA-Z_0-9%-]+)%.lua$")
     if not name then return end
@@ -481,7 +443,7 @@ function LoadLuaFileExt(tab, file, proto)
 
     local success, result = pcall(function()return cfgfn(assert(_G or _ENV))end)
     if not success then
-      report(("Error while processing file: '%s'."):format(result))
+      ide:Print(("Error while processing file: '%s'."):format(result))
     else
       if (tab[name]) then
         local out = tab[name]
@@ -490,31 +452,34 @@ function LoadLuaFileExt(tab, file, proto)
         end
       else
         tab[name] = proto and result and setmetatable(result, proto) or result
+        if tab[name] then tab[name].fpath = file end
       end
     end
   end
+  return tab
 end
 
 function LoadLuaConfig(filename,isstring)
   if not filename then return end
   -- skip those files that don't exist
-  if not isstring and not wx.wxFileName(filename):FileExists() then return end
+  if not isstring and not wx.wxFileExists(filename) then return end
   -- if it's marked as command, but exists as a file, load it as a file
-  if isstring and wx.wxFileName(filename):FileExists() then isstring = false end
+  if isstring and wx.wxFileExists(filename) then isstring = false end
 
   local cfgfn, err, msg
   if isstring
   then msg, cfgfn, err = "string", loadstring(filename)
   else msg, cfgfn, err = "file", loadfile(filename) end
 
-  local report = DisplayOutputLn or print
   if not cfgfn then
-    report(("Error while loading configuration %s: '%s'."):format(msg, err))
+    ide:Print(("Error while loading configuration %s: '%s'."):format(msg, err))
   else
     setfenv(cfgfn,ide.config)
+    table.insert(ide.configqueue, (wx.wxFileName.SplitPath(filename)))
     local _, err = pcall(function()cfgfn(assert(_G or _ENV))end)
+    table.remove(ide.configqueue)
     if err then
-      report(("Error while processing configuration %s: '%s'."):format(msg, err))
+      ide:Print(("Error while processing configuration %s: '%s'."):format(msg, err))
     end
   end
   return true
@@ -535,36 +500,6 @@ function LoadSafe(data)
   return ok, res
 end
 
-local function isCtrlFocused(e)
-  local ctrl = e and e:FindFocus()
-  return ctrl and
-    (ctrl:GetId() == e:GetId()
-     or ide.osname == 'Macintosh' and
-       ctrl:GetParent():GetId() == e:GetId()) and ctrl or nil
-end
-
-function GetEditorWithFocus(...)
-  -- need to distinguish GetEditorWithFocus() and GetEditorWithFocus(nil)
-  -- as the latter may happen when GetEditor() is passed and returns `nil`
-  if select('#', ...) > 0 then
-    local ed = ...
-    return isCtrlFocused(ed) and ed or nil
-  end
-
-  local editor = GetEditor()
-  if isCtrlFocused(editor) then return editor end
-
-  local nb = ide:GetOutputNotebook()
-  for p = 0, nb:GetPageCount()-1 do
-    local ctrl = nb:GetPage(p)
-    if ctrl:GetClassInfo():GetClassName() == "wxStyledTextCtrl"
-    and isCtrlFocused(ctrl) then
-      return ctrl:DynamicCast("wxStyledTextCtrl")
-    end
-  end
-  return nil
-end
-
 function GenerateProgramFilesPath(exec, sep)
   local env = os.getenv('ProgramFiles')
   return
@@ -573,41 +508,6 @@ function GenerateProgramFilesPath(exec, sep)
     [[D:\Program Files\]]..exec..sep..
     [[C:\Program Files (x86)\]]..exec..sep..
     [[D:\Program Files (x86)\]]..exec
-end
-
---[[ format placeholders
-    - %f -- full project name (project path)
-    - %s -- short project name (directory name)
-    - %i -- interpreter name
-    - %S -- file name
-    - %F -- file path
-    - %n -- line number
-    - %c -- line content
-    - %T -- application title
-    - %v -- application version
-    - %t -- current tab name
---]]
-function ExpandPlaceholders(msg, ph)
-  ph = ph or {}
-  if type(msg) == 'function' then return msg(ph) end
-  local editor = ide:GetEditor()
-  local proj = ide:GetProject() or ""
-  local dirs = wx.wxFileName(proj):GetDirs()
-  local doc = editor and ide:GetDocument(editor)
-  local nb = ide:GetEditorNotebook()
-  local def = {
-    f = proj,
-    s = dirs[#dirs] or "",
-    i = ide:GetInterpreter():GetName() or "",
-    S = doc and doc:GetFileName() or "",
-    F = doc and doc:GetFilePath() or "",
-    n = editor and editor:GetCurrentLine()+1 or 0,
-    c = editor and editor:GetLine(editor:GetCurrentLine()) or "",
-    T = GetIDEString("editor") or "",
-    v = ide.VERSION,
-    t = editor and nb:GetPageText(nb:GetPageIndex(editor)) or "",
-  }
-  return(msg:gsub('%%(%w)', function(p) return ph[p] or def[p] or '?' end))
 end
 
 function MergeSettings(localSettings, savedSettings)
@@ -630,3 +530,43 @@ function MergeSettings(localSettings, savedSettings)
     end
   end
 end
+
+function UpdateMenuUI(menu, obj)
+  if not menu or not obj then return end
+  for pos = 0, menu:GetMenuItemCount()-1 do
+    local id = menu:FindItemByPosition(pos):GetId()
+    local uievent = wx.wxUpdateUIEvent(id)
+    obj:ProcessEvent(uievent)
+    menu:Enable(id, not uievent:GetSetEnabled() or uievent:GetEnabled())
+  end
+end
+
+local function plaindump(val, opts, done)
+  local keyignore = opts and opts.keyignore or {}
+  local final = done == nil
+  opts, done = opts or {}, done or {}
+  local t = type(val)
+  if t == "table" then
+    done[#done+1] = '{'
+    done[#done+1] = ''
+    for key, value in pairs (val) do
+      if not keyignore[key] then
+        done[#done+1] = '['
+        plaindump(key, opts, done)
+        done[#done+1] = ']='
+        plaindump(value, opts, done)
+        done[#done+1] = ","
+      end
+    end
+    done[#done] = '}'
+  elseif t == "string" then
+    done[#done+1] = ("%q"):format(val):gsub("\010","n"):gsub("\026","\\026")
+  elseif t == "number" then
+    done[#done+1] = ("%.17g"):format(val)
+  else
+    done[#done+1] = tostring(val)
+  end
+  return final and table.concat(done, '')
+end
+
+DumpPlain = plaindump

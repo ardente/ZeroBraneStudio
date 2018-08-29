@@ -1,4 +1,4 @@
--- Copyright 2011-15 Paul Kulchenko, ZeroBrane LLC
+-- Copyright 2011-17 Paul Kulchenko, ZeroBrane LLC
 -- authors: Lomtik Software (J. Winwood & John Labenski)
 --          Luxinia Dev (Eike Decker & Christoph Kubisch)
 ---------------------------------------------------------
@@ -11,7 +11,7 @@ function NewID()
 end
 
 -- some Ubuntu versions (Ubuntu 13.10) ignore labels on stock menu IDs,
--- so don't use stock IDs on Linux
+-- so don't use stock IDs on Linux (http://trac.wxwidgets.org/ticket/15958)
 local linux = ide.osname == 'Unix'
 
 ID_SEPARATOR        = NewID()
@@ -21,6 +21,8 @@ ID_OPEN             = linux and NewID() or wx.wxID_OPEN
 ID_CLOSE            = NewID()
 ID_CLOSEALL         = NewID()
 ID_CLOSEOTHER       = NewID()
+ID_CLOSESEARCHRESULTS = NewID()
+ID_REFRESHSEARCHRESULTS = NewID()
 ID_NEWFILE          = NewID()
 ID_NEWDIRECTORY     = NewID()
 ID_RENAMEFILE       = NewID()
@@ -35,7 +37,10 @@ ID_RECENTFILESNEXT  = NewID()
 ID_RECENTPROJECTS   = NewID()
 ID_RECENTPROJECTSCLEAR = NewID()
 ID_RECENTPROJECTSPREV = NewID()
+ID_PRINT            = NewID()
+ID_PAGESETUP        = NewID()
 ID_EXIT             = linux and NewID() or wx.wxID_EXIT
+ID_RESTART          = NewID()
 -- Edit menu
 ID_CUT              = linux and NewID() or wx.wxID_CUT
 ID_COPY             = linux and NewID() or wx.wxID_COPY
@@ -48,6 +53,7 @@ ID_AUTOCOMPLETE     = NewID()
 ID_AUTOCOMPLETEENABLE = NewID()
 ID_COMMENT          = NewID()
 ID_FOLD             = NewID()
+ID_FOLDLINE         = NewID()
 ID_CLEARDYNAMICWORDS = NewID()
 ID_SOURCE           = NewID()
 ID_REINDENT         = NewID()
@@ -55,6 +61,8 @@ ID_BOOKMARK         = NewID()
 ID_BOOKMARKTOGGLE   = NewID()
 ID_BOOKMARKNEXT     = NewID()
 ID_BOOKMARKPREV     = NewID()
+ID_BOOKMARKFILECLEAR = NewID()
+ID_BOOKMARKPROJECTCLEAR = NewID()
 ID_NAVIGATE         = NewID()
 ID_NAVIGATETOFILE   = NewID()
 ID_NAVIGATETOLINE   = NewID()
@@ -81,6 +89,7 @@ ID_VIEWOUTPUT       = NewID()
 ID_VIEWCALLSTACK    = NewID()
 ID_VIEWWATCHWINDOW  = NewID()
 ID_VIEWOUTLINE      = NewID()
+ID_VIEWMARKERS      = NewID()
 ID_VIEWTOOLBAR      = NewID()
 ID_VIEWSTATUSBAR    = NewID()
 ID_VIEWDEFAULTLAYOUT = NewID()
@@ -91,7 +100,12 @@ ID_ZOOMRESET        = NewID()
 ID_ZOOMIN           = NewID()
 ID_ZOOMOUT          = NewID()
 -- Project menu
-ID_TOGGLEBREAKPOINT = NewID()
+ID_BREAKPOINT       = NewID()
+ID_BREAKPOINTTOGGLE = NewID()
+ID_BREAKPOINTNEXT   = NewID()
+ID_BREAKPOINTPREV   = NewID()
+ID_BREAKPOINTFILECLEAR = NewID()
+ID_BREAKPOINTPROJECTCLEAR = NewID()
 ID_COMPILE          = NewID()
 ID_ANALYZE          = NewID()
 ID_RUN              = NewID()
@@ -106,11 +120,14 @@ ID_STEPOUT          = NewID()
 ID_RUNTO            = NewID()
 ID_BREAK            = NewID()
 ID_TRACE            = NewID()
+ID_CLEAROUTPUTENABLE = NewID()
 ID_CLEAROUTPUT      = NewID()
+ID_CLEARCONSOLE     = NewID()
 ID_COMMANDLINEPARAMETERS = NewID()
 ID_INTERPRETER      = NewID()
 ID_PROJECTDIR       = NewID()
 ID_PROJECTDIRFROMFILE = NewID()
+ID_PROJECTDIRFROMDIR = NewID()
 ID_PROJECTDIRCHOOSE = NewID()
 -- Help menu
 ID_ABOUT            = linux and NewID() or wx.wxID_ABOUT
@@ -150,6 +167,8 @@ ID_SYMBOLDIRDISABLE = NewID()
 ID_SYMBOLDIRENABLE  = NewID()
 -- outline menu
 ID_OUTLINESORT      = NewID()
+-- console menu
+ID_SELECTCONSOLECOMMAND = NewID()
 -- search toolbar
 ID_FINDALL          = NewID()
 ID_FINDREPLACENEXT  = NewID()
@@ -160,6 +179,7 @@ ID_FINDOPTSCOPE     = NewID()
 ID_FINDOPTSTATUS    = NewID()
 ID_FINDOPTDIRECTION = NewID()
 ID_FINDOPTWRAPWROUND = NewID()
+ID_FINDOPTSELECTION = NewID()
 ID_FINDOPTWORD      = NewID()
 ID_FINDOPTCASE      = NewID()
 ID_FINDOPTREGEX     = NewID()
@@ -167,6 +187,9 @@ ID_FINDOPTCONTEXT   = NewID()
 ID_FINDOPTSUBDIR    = NewID()
 ID_FINDOPTMULTIRESULTS = NewID()
 ID_RECENTSCOPECLEAR = NewID()
+-- global shortcuts
+ID_NOTEBOOKTABNEXT  = NewID()
+ID_NOTEBOOKTABPREV  = NewID()
 
 local ids = {}
 function IDgen (name)

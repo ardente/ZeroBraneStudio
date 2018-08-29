@@ -1,4 +1,4 @@
--- Copyright 2011-15 Paul Kulchenko, ZeroBrane LLC
+-- Copyright 2011-18 Paul Kulchenko, ZeroBrane LLC
 -- authors: Lomtik Software (J. Winwood & John Labenski)
 -- Luxinia Dev (Eike Decker & Christoph Kubisch)
 ---------------------------------------------------------
@@ -6,6 +6,7 @@
 local ide = ide
 local searchpanel = 'searchpanel'
 local q = EscapeMagic
+local unpack = table.unpack or unpack
 ide.findReplace = {
   panel = nil, -- the control for find/replace
   replace = false, -- is it a find or replace
@@ -19,6 +20,7 @@ ide.findReplace = {
   scopeText = nil,
   foundString = false, -- was the string found for the last search
   curfilename = "", -- for search in files
+  inselection = false,
   occurrences = 0,
   files = 0,
 
@@ -45,14 +47,13 @@ ide.findReplace = {
   -- GetEditor() which editor to use
 }
 local findReplace = ide.findReplace
-local NOTFOUND = -1
 local replaceHintText = '<replace with>'
 local sep = ';'
 
 function findReplace:GetEditor(reset)
   if reset or not ide:IsValidCtrl(self.cureditor) then self.cureditor = nil end
   self.cureditor = ide:GetEditorWithLastFocus() or self.cureditor
-  return self.oveditor or self.cureditor or GetEditor()
+  return self.oveditor or self.cureditor or ide:GetEditor()
 end
 
 -------------------- Find replace dialog
@@ -66,35 +67,23 @@ local function setSearchFlags(editor)
   editor:SetSearchFlags(flags)
 end
 
-local function setTarget(editor, fDown, fAll, fWrap)
-  local selStart = editor:GetSelectionStart()
-  local selEnd = editor:GetSelectionEnd()
+local function setTarget(editor, flags)
+  flags = flags or {}
+  local fDown, fAll, fWrap = flags.Down, flags.All, flags.Wrap
   local len = editor:GetLength()
+  local selStart, selEnd = editor:GetSelectionStart(), editor:GetSelectionEnd()
   local s, e
   if fDown then
-    s = iff(fAll, selStart, selEnd)
-    e = len
-  else
-    s = 0
-    e = iff(fAll, selEnd, selStart)
+    e = flags.EndPos or len
+    s = math.min(e, math.max(flags.StartPos or 0, (fAll and selStart or selEnd)))
+  else -- reverse the range for the backward search
+    e = flags.StartPos or 0
+    s = math.max(e, math.min(flags.EndPos or len, (fAll and selEnd or selStart)))
   end
-  -- if going up and not search/replace All, then switch the range to
-  -- allow the next match to be properly marked
-  if not fDown and not fAll then s, e = e, s end
   -- if wrap around and search all requested, then search the entire document
   if fAll and fWrap then s, e = 0, len end
   editor:SetTargetStart(s)
   editor:SetTargetEnd(e)
-  return e
-end
-
-local function setTargetAll(editor)
-  local s = 0
-  local e = editor:GetLength()
-
-  editor:SetTargetStart(s)
-  editor:SetTargetEnd(e)
-
   return e
 end
 
@@ -145,7 +134,7 @@ function findReplace:GetScope()
   local scopeval = self.scope:GetValue()
   local dir, mask = scopeval:match(('([^%s]*)%s%%s*(.+)'):format(sep,sep))
   if not dir then dir = scopeval end
-  -- trip leading/trailing spaces from the directory
+  -- strip leading/trailing spaces from the directory
   dir = dir:gsub("^%s+",""):gsub("%s+$","")
   -- if the directory doesn't exist, treat it as the extension(s)
   if not mask and not wx.wxDirExists(dir) and dir:find('%*') then
@@ -170,10 +159,10 @@ function findReplace:GetWordAtCaret()
   local editor = self:GetEditor()
   if editor then
     local pos = editor:GetCurrentPos()
-    local text = editor:GetTextRange( -- try to select a word under caret
+    local text = editor:GetTextRangeDyn( -- try to select a word under caret
       editor:WordStartPosition(pos, true), editor:WordEndPosition(pos, true))
     if #text == 0 then
-      editor:GetTextRange( -- try to select a non-word under caret
+      editor:GetTextRangeDyn( -- try to select a non-word under caret
         editor:WordStartPosition(pos, false), editor:WordEndPosition(pos, false))
     end
     return #text > 0 and text or nil
@@ -188,7 +177,7 @@ function findReplace:GetSelection()
     local endSel = editor:GetSelectionEnd()
     if (startSel ~= endSel)
     and (editor:LineFromPosition(startSel) == editor:LineFromPosition(endSel)) then
-      return editor:GetTextRange(startSel, endSel)
+      return editor:GetTextRangeDyn(startSel, endSel)
     end
   end
   return
@@ -201,25 +190,35 @@ function findReplace:Find(reverse)
   local msg = ""
   local editor = self:GetEditor()
   if editor and self:HasText() then
-    local fDown = iff(reverse, not self:GetFlags().Down, self:GetFlags().Down)
+    local fDown = (reverse and not self:GetFlags().Down) or (not reverse and self:GetFlags().Down)
+    local bf = self.inselection and self.backfocus or {}
     setSearchFlags(editor)
-    setTarget(editor, fDown)
+    setTarget(editor, {Down = fDown, StartPos = bf.spos, EndPos = bf.epos})
     local posFind = editor:SearchInTarget(findText)
-    if (posFind == NOTFOUND) and self:GetFlags().Wrap then
-      editor:SetTargetStart(iff(fDown, 0, editor:GetLength()))
-      editor:SetTargetEnd(iff(fDown, editor:GetLength(), 0))
+    if (posFind == wx.wxNOT_FOUND) and self:GetFlags().Wrap then
+      editor:SetTargetStart(fDown and (bf.spos or 0) or (bf.epos or editor:GetLength()))
+      editor:SetTargetEnd(fDown and (bf.epos or editor:GetLength()) or (bf.spos or 0))
       posFind = editor:SearchInTarget(findText)
-      msg = TR("Reached end of text and wrapped around.")
+      msg = (self.inselection
+        and TR("Reached end of selection and wrapped around.")
+        or TR("Reached end of text and wrapped around.")
+      )
     end
-    if posFind == NOTFOUND then
+    if posFind == wx.wxNOT_FOUND then
       self.foundString = false
       msg = TR("Text not found.")
+      local parent = editor:GetParent()
+      if parent and parent:GetClassInfo():GetClassName() == 'wxAuiNotebook' then
+        local nb = parent:DynamicCast("wxAuiNotebook")
+        local index = nb:GetPageIndex(editor)
+        if index ~= wx.wxNOT_FOUND then msg = nb:GetPageText(index)..": "..msg end
+      end
     else
       self.foundString = true
       local start = editor:GetTargetStart()
       local finish = editor:GetTargetEnd()
-      editor:ShowPosEnforcePolicy(finish)
       editor:SetSelection(start, finish)
+      editor:ShowRange(finish, start)
     end
   end
   self:SetStatus(msg)
@@ -237,12 +236,12 @@ function findReplace:FindAll(inFileRegister)
   local found = false
   local editor = self:GetEditor()
   if editor and self:HasText() then
-    local e = setTargetAll(editor)
+    local e = setTarget(editor, {All = true, Wrap = true})
 
     setSearchFlags(editor)
     while true do
       local posFind = editor:SearchInTarget(findText)
-      if posFind == NOTFOUND then break end
+      if posFind == wx.wxNOT_FOUND then break end
       inFileRegister(posFind, editor:GetTargetEnd()-posFind)
       editor:SetTargetStart(editor:GetTargetEnd())
       editor:SetTargetEnd(e)
@@ -275,8 +274,14 @@ function findReplace:Replace(fReplaceAll, resultsEditor)
       return false
     end
 
-    local endTarget = resultsEditor and setTargetAll(editor) or
-      setTarget(editor, self:GetFlags().Down, fReplaceAll, self:GetFlags().Wrap)
+    -- in the preview results always replace in the entire file
+    local bf = self.inselection and self.backfocus
+    local endTarget = (resultsEditor and setTarget(editor, {All = true, Wrap = true})
+      -- when selection is marked, only replace in the selection
+      or (bf and setTarget(editor, {Down = self:GetFlags().Down, All = fReplaceAll, StartPos = bf.spos, EndPos = bf.epos}))
+      -- in all other cases, replace as selected
+      or setTarget(editor, {Down = self:GetFlags().Down, All = fReplaceAll, Wrap = self:GetFlags().Wrap})
+    )
 
     if fReplaceAll then
       if resultsEditor then editor:SetIndicatorCurrent(indicator.SEARCHMATCH) end
@@ -284,16 +289,16 @@ function findReplace:Replace(fReplaceAll, resultsEditor)
       setSearchFlags(editor)
       local occurrences = 0
       local posFind = editor:SearchInTarget(findText)
-      if posFind ~= NOTFOUND then
+      if posFind ~= wx.wxNOT_FOUND then
         editor:BeginUndoAction()
-        while posFind ~= NOTFOUND do
+        while posFind ~= wx.wxNOT_FOUND do
           local length = editor:GetLength()
           -- if replace-in-files (resultsEditor) is being done,
           -- then check that the match starts with %d+:
           local match = true
           if resultsEditor then
             local line = editor:LineFromPosition(posFind)
-            local _, _, prefix = editor:GetLine(line):find("^(%s*%d+: )")
+            local _, _, prefix = editor:GetLineDyn(line):find("^(%s*%d+: )")
             match = prefix and posFind >= editor:PositionFromLine(line)+#prefix
           end
           if match then
@@ -309,7 +314,10 @@ function findReplace:Replace(fReplaceAll, resultsEditor)
           editor:SetTargetStart(editor:GetTargetEnd())
           -- adjust the endTarget as the position could have changed;
           -- can't simply subtract text length as it could be a regexp
-          endTarget = endTarget + (editor:GetLength() - length)
+          local adjusted = editor:GetLength() - length
+          endTarget = endTarget + adjusted
+          -- also adjust the selection as the end marker can move after replacement
+          if bf and bf.epos then bf.epos = bf.epos + adjusted end
           editor:SetTargetEnd(endTarget)
           posFind = editor:SearchInTarget(findText)
         end
@@ -324,11 +332,14 @@ function findReplace:Replace(fReplaceAll, resultsEditor)
       -- move the cursor after successful search
       if editor:GetSelectionStart() ~= editor:GetSelectionEnd()
       -- check that the current selection matches what's being searched for
-      and editor:SearchInTarget(findText) ~= NOTFOUND then
+      and editor:SearchInTarget(findText) ~= wx.wxNOT_FOUND then
+        local length = editor:GetLength()
         local start = editor:GetSelectionStart()
         local replaced = self:GetFlags().RegularExpr
           and editor:ReplaceTargetRE(replaceText)
           or editor:ReplaceTarget(replaceText)
+        local adjusted = editor:GetLength() - length
+        if bf and bf.epos then bf.epos = bf.epos + adjusted end
 
         editor:SetSelection(start, start + replaced)
         self.foundString = false
@@ -345,7 +356,7 @@ end
 local oldline
 local FILE_MARKER = ide:GetMarker("searchmatchfile")
 local FILE_MARKER_VALUE = 2^FILE_MARKER
-local function getRawLine(ed, line) return (ed:GetLine(line):gsub("[\n\r]+$","")) end
+local function getRawLine(ed, line) return (ed:GetLineDyn(line):gsub("[\n\r]+$","")) end
 local function onFileRegister(pos, length)
   local editor = findReplace.oveditor
   local reseditor = findReplace.reseditor
@@ -360,11 +371,11 @@ local function onFileRegister(pos, length)
   if oldline ~= posline then
     if posline and not oldline then
       -- show file name and a bookmark marker
-      reseditor:AppendText(findReplace.curfilename.."\n")
+      reseditor:AppendTextDyn(findReplace.curfilename.."\n")
       reseditor:MarkerAdd(lines-1, FILE_MARKER)
       reseditor:SetFoldLevel(lines-1, reseditor:GetFoldLevel(lines-1)
         + wxstc.wxSTC_FOLDLEVELHEADERFLAG)
-      findReplace:SetStatus(GetFileName(findReplace.curfilename))
+      findReplace:SetStatus(TR("Found match in '%s'."):format(GetFileName(findReplace.curfilename)))
 
       lines = lines + 1
 
@@ -397,7 +408,7 @@ local function onFileRegister(pos, length)
     end
     oldline = posline
 
-    reseditor:AppendText(text)
+    reseditor:AppendTextDyn(text)
 
     for line = lines-1, reseditor:GetLineCount()-2 do
       reseditor:SetFoldLevel(line, wxstc.wxSTC_FOLDLEVELBASE + 1)
@@ -435,34 +446,47 @@ function findReplace:ProcInFiles(startdir,mask,subdirs)
     text = text:gsub("%w",function(s) return "["..s:lower()..s:upper().."]" end)
   end
 
-  local files = coroutine.wrap(function() FileSysGetRecursive(startdir, subdirs, mask, {yield = true, folder = false}) end)
+  local lastupdate = os.clock()
+  local function yield(dir, force)
+    local now = os.clock()
+    if now-lastupdate < 0.1 and not force then return true end -- skip too frequent requests
+    lastupdate = now
+
+    if dir then self:SetStatus(TR("Searching in '%s'."):format(dir:gsub("^"..q(startdir),""))) end
+
+    ide:Yield() -- give time to the UI to refresh
+    -- the IDE may be quitting after Yield or the tab may be closed,
+    local ok, mgr = pcall(function() return ide:GetUIManager() end)
+    -- so check to make sure the manager is still active
+    -- and check that the search results tab is still open
+    -- return `nil` to abort processing if one of the checks fails
+    return ok and mgr:GetPane(searchpanel):IsShown() and ide:IsValidCtrl(self.reseditor) or nil
+  end
+
+  local files = coroutine.wrap(function()
+      ide:GetFileList(startdir, subdirs, mask, {
+          yield = true, folder = false, skipbinary = true, ondirectory = yield
+        })
+    end)
   while true do
     local file = files()
-    if not file then break end
+    if file == false then return false end -- aborted processing
+    if file == nil then break end -- out of files to process
 
     if checkBinary(GetFileExt(file)) ~= true then
       self.curfilename = file
       local filetext, err = FileRead(file, firstReadSize)
       if not filetext then
-        DisplayOutputLn(TR("Can't open file '%s': %s"):format(file, err))
+        ide:Print(TR("Can't open file '%s': %s"):format(file, err))
       elseif not checkBinary(GetFileExt(file), filetext) then
         -- read the rest if there is more to read in the file
         if #filetext == firstReadSize then filetext = FileRead(file) end
         if filetext and (not text or filetext:find(text)) then
-          self.oveditor:SetText(filetext)
+          self.oveditor:SetTextDyn(filetext)
 
           if self:FindAll(onFileRegister) then self.files = self.files + 1 end
-
-          -- give time to the UI to refresh
-          ide:Yield()
-          -- the IDE may be quitting after Yield or the tab may be closed,
-          local ok, mgr = pcall(function() return ide:GetUIManager() end)
-          -- so check to make sure the manager is still active
-          if not (ok and mgr:GetPane(searchpanel):IsShown())
-          -- and check that the search results tab is still open
-          or not ide:IsValidCtrl(self.reseditor) then
-            return false
-          end
+          -- force a UI update on a match and abort if the user canceled the search
+          if not yield(nil, true) then return false end
         end
       end
     end
@@ -485,7 +509,6 @@ function findReplace:RunInFiles(replace)
   ide:Yield() -- let the update of the UI happen
 
   -- save focus to restore after adding a page with search results
-  local ctrl = ide:GetMainFrame():FindFocus()
   local findText = self.findCtrl:GetValue()
   local flags = self:GetFlags()
   local showaseditor = ide.config.search.showaseditor
@@ -522,10 +545,25 @@ function findReplace:RunInFiles(replace)
           local line = editor:LineFromPosition(event:GetPosition())
           local header = bit.band(editor:GetFoldLevel(line),
             wxstc.wxSTC_FOLDLEVELHEADERFLAG) == wxstc.wxSTC_FOLDLEVELHEADERFLAG
-          if wx.wxGetKeyState(wx.WXK_SHIFT) and wx.wxGetKeyState(wx.WXK_CONTROL) then
-            editor:FoldSome()
-          elseif header then
+          local shift, ctrl = wx.wxGetKeyState(wx.WXK_SHIFT), wx.wxGetKeyState(wx.WXK_CONTROL)
+          if shift and ctrl then
+            editor:FoldSome(line)
+          elseif ctrl then -- select the scope that was clicked on
+            local from = header and line or editor:GetFoldParent(line)
+            if from > -1 then -- only select if there is a block to select
+              local to = editor:GetLastChild(from, -1)
+              editor:SetSelection(editor:PositionFromLine(from), editor:PositionFromLine(to+1))
+            end
+          elseif header or shift then
             editor:ToggleFold(line)
+          end
+        end)
+      reseditor:Connect(wx.wxEVT_KEY_DOWN,
+        function (event)
+          if event:GetKeyCode() == wx.WXK_ESCAPE and self:IsShown() then
+            self:Hide()
+          else
+            event:Skip()
           end
         end)
 
@@ -550,20 +588,18 @@ function findReplace:RunInFiles(replace)
         and not wx.wxGetKeyState(wx.WXK_CONTROL)
         and not wx.wxGetKeyState(wx.WXK_ALT) then
           local point = event:GetPosition()
-          local margin = 0
-          for m = 0, ide.MAXMARGIN do margin = margin + reseditor:GetMarginWidth(m) end
-          if point:GetX() <= margin then return end
+          if point:GetX() <= reseditor:GetAllMarginWidth() then return end
 
           local pos = reseditor:PositionFromPoint(point)
           local line = reseditor:LineFromPosition(pos)
-          local text = reseditor:GetLine(line):gsub("[\n\r]+$","")
+          local text = reseditor:GetLineDyn(line):gsub("[\n\r]+$","")
           -- get line with the line number
           local jumpline = text:match("^%s*(%d+)")
           local file
           if jumpline then
             -- search back to find the file name
             for curline = line-1, 0, -1 do
-              local text = reseditor:GetLine(curline):gsub("[\n\r]+$","")
+              local text = reseditor:GetLineDyn(curline):gsub("[\n\r]+$","")
               if not text:find("^%s") and wx.wxFileExists(text) then
                 file = text
                 break
@@ -600,7 +636,7 @@ function findReplace:RunInFiles(replace)
   reseditor.replace = replace -- keep track of the current status
   reseditor:ShowLines(0, reseditor:GetLineCount()-1)
   reseditor:SetReadOnly(false)
-  reseditor:SetText('')
+  reseditor:SetTextDyn('')
   do -- update the preview name
     local nb = showaseditor and ide:GetEditorNotebook() or nb
     nb:SetPageText(nb:GetPageIndex(reseditor), previewText .. findText)
@@ -613,23 +649,19 @@ function findReplace:RunInFiles(replace)
     end
   end
 
-  self:SetStatus(TR("Searching for '%s'."):format(findText))
+  self:SetStatus(TR("Searching for '%s'."):format(findText)
+    .." "..TR("Use %s to close."):format("`Escape`"))
   wx.wxSafeYield() -- allow the status to update
 
-  -- return focus to the control that had it if it's on the search panel
-  -- (as it could be changed by added results tab)
-  if ctrl and ctrl:GetParent():GetId() == self.panel:GetId()
-  or not showaseditor then ctrl:SetFocus() end
-
   local startdir, mask = self:GetScope()
-  local completed = self:ProcInFiles(startdir, mask or "*.*", flags.SubDirs)
+  local completed = self:ProcInFiles(startdir, mask or "*", flags.SubDirs)
 
   -- reseditor may already be closed, so check if it's valid first
   if ide:IsValidCtrl(reseditor) then
     reseditor:GotoPos(reseditor:GetLength())
-    reseditor:AppendText(("Searched for '%s'. "):format(findText))
-    if not completed then reseditor:AppendText("Cancelled by the user. ") end
-    reseditor:AppendText(("Found %d %s on %d %s in %d %s.")
+    reseditor:AppendTextDyn(("Searched for '%s'. "):format(findText))
+    if not completed then reseditor:AppendTextDyn("Cancelled by the user. ") end
+    reseditor:AppendTextDyn(("Found %d %s on %d %s in %d %s.")
       :format(
         self.occurrences, makePlural("instance", self.occurrences),
         self.lines, makePlural("line", self.lines),
@@ -638,7 +670,7 @@ function findReplace:RunInFiles(replace)
     reseditor:SetSavePoint() -- set unmodified status
 
     if completed and replace and self.occurrences > 0 then
-      reseditor:AppendText("\n\n"
+      reseditor:AppendTextDyn("\n\n"
         .."Review the changes and save this preview to apply them.\n"
         .."You can also make other changes; only lines with : will be updated.\n"
         .."Context lines (if any) are used as safety checks during the update.")
@@ -650,43 +682,48 @@ function findReplace:RunInFiles(replace)
     reseditor.searchpreview = findText
   end
 
-  self:SetStatus(not completed and TR("Cancelled by the user.")
-    or TR("Found %d instance.", self.occurrences):format(self.occurrences))
-  if completed and ide.config.search.autohide then self:Hide() end
+  -- the IDE may be closing during search, in which case simply return,
+  -- as the controls are likely to be in some invalid state anyway
+  if not ide:IsValidCtrl(self.oveditor) then return end
+
+  local msg = TR(replace and "Replaced %d instance." or "Found %d instance.", self.occurrences)
+  self:SetStatus(not completed and TR("Cancelled by the user.") or msg:format(self.occurrences))
   self.oveditor:Destroy()
   self.oveditor = nil
   self.toolbar:UpdateWindowUI(wx.wxUPDATE_UI_FROMIDLE)
+
+  if completed and ide.config.search.autohide then self:Hide() end
 end
 
 local icons = {
   find = {
     internal = {
-      ID_FINDNEXT, ID_SEPARATOR,
-      ID_FINDOPTDIRECTION, ID_FINDOPTWRAPWROUND,
-      ID_FINDOPTWORD, ID_FINDOPTCASE, ID_FINDOPTREGEX,
-      ID_SEPARATOR, ID_FINDOPTSTATUS,
+      ID.FINDNEXT, ID.SEPARATOR,
+      ID.FINDOPTDIRECTION, ID.FINDOPTWRAPWROUND, ID.FINDOPTSELECTION,
+      ID.FINDOPTWORD, ID.FINDOPTCASE, ID.FINDOPTREGEX,
+      ID.SEPARATOR, ID.FINDOPTSTATUS,
     },
     infiles = {
-      ID_FINDNEXT, ID_SEPARATOR,
-      ID_FINDOPTCONTEXT, ID_FINDOPTMULTIRESULTS, ID_FINDOPTWORD,
-      ID_FINDOPTCASE, ID_FINDOPTREGEX, ID_FINDOPTSUBDIR,
-      ID_FINDOPTSCOPE, ID_FINDSETDIR,
-      ID_SEPARATOR, ID_FINDOPTSTATUS,
+      ID.FIND, ID.SEPARATOR,
+      ID.FINDOPTCONTEXT, ID.FINDOPTMULTIRESULTS, ID.FINDOPTWORD,
+      ID.FINDOPTCASE, ID.FINDOPTREGEX, ID.FINDOPTSUBDIR,
+      ID.FINDOPTSCOPE, ID.FINDSETDIR,
+      ID.SEPARATOR, ID.FINDOPTSTATUS,
     },
   },
   replace = {
     internal = {
-      ID_FINDNEXT, ID_FINDREPLACENEXT, ID_FINDREPLACEALL, ID_SEPARATOR,
-      ID_FINDOPTDIRECTION, ID_FINDOPTWRAPWROUND,
-      ID_FINDOPTWORD, ID_FINDOPTCASE, ID_FINDOPTREGEX,
-      ID_SEPARATOR, ID_FINDOPTSTATUS,
+      ID.FINDNEXT, ID.FINDREPLACENEXT, ID.FINDREPLACEALL, ID.SEPARATOR,
+      ID.FINDOPTDIRECTION, ID.FINDOPTWRAPWROUND, ID.FINDOPTSELECTION,
+      ID.FINDOPTWORD, ID.FINDOPTCASE, ID.FINDOPTREGEX,
+      ID.SEPARATOR, ID.FINDOPTSTATUS,
     },
     infiles = {
-      ID_FINDNEXT, ID_FINDREPLACEALL, ID_SEPARATOR,
-      ID_FINDOPTCONTEXT, ID_FINDOPTMULTIRESULTS, ID_FINDOPTWORD,
-      ID_FINDOPTCASE, ID_FINDOPTREGEX, ID_FINDOPTSUBDIR,
-      ID_FINDOPTSCOPE, ID_FINDSETDIR,
-      ID_SEPARATOR, ID_FINDOPTSTATUS,
+      ID.FIND, ID.FINDREPLACEALL, ID.SEPARATOR,
+      ID.FINDOPTCONTEXT, ID.FINDOPTMULTIRESULTS, ID.FINDOPTWORD,
+      ID.FINDOPTCASE, ID.FINDOPTREGEX, ID.FINDOPTSUBDIR,
+      ID.FINDOPTSCOPE, ID.FINDSETDIR,
+      ID.SEPARATOR, ID.FINDOPTSTATUS,
     },
   },
 }
@@ -700,11 +737,11 @@ function findReplace:createToolbar()
   tb:Freeze()
   tb:Clear()
   for _, id in ipairs(icons) do
-    if id == ID_SEPARATOR then
+    if id == ID.SEPARATOR then
       tb:AddSeparator()
-    elseif id == ID_FINDOPTSCOPE then
+    elseif id == ID.FINDOPTSCOPE then
       tb:AddControl(scope)
-    elseif id == ID_FINDOPTSTATUS then
+    elseif id == ID.FINDOPTSTATUS then
       tb:AddControl(status)
     else
       local iconmap = ide.config.toolbar.iconmap[id]
@@ -718,14 +755,14 @@ function findReplace:createToolbar()
   end
 
   local options = {
-    [ID_FINDOPTDIRECTION] = 'Down',
-    [ID_FINDOPTWRAPWROUND] = 'Wrap',
-    [ID_FINDOPTWORD] = 'WholeWord',
-    [ID_FINDOPTCASE] = 'MatchCase',
-    [ID_FINDOPTREGEX] = 'RegularExpr',
-    [ID_FINDOPTSUBDIR] = 'SubDirs',
-    [ID_FINDOPTCONTEXT] = 'Context',
-    [ID_FINDOPTMULTIRESULTS] = 'MultiResults',
+    [ID.FINDOPTDIRECTION] = 'Down',
+    [ID.FINDOPTWRAPWROUND] = 'Wrap',
+    [ID.FINDOPTWORD] = 'WholeWord',
+    [ID.FINDOPTCASE] = 'MatchCase',
+    [ID.FINDOPTREGEX] = 'RegularExpr',
+    [ID.FINDOPTSUBDIR] = 'SubDirs',
+    [ID.FINDOPTCONTEXT] = 'Context',
+    [ID.FINDOPTMULTIRESULTS] = 'MultiResults',
   }
 
   for id, var in pairs(options) do
@@ -744,15 +781,29 @@ function findReplace:createToolbar()
     end
   end
 
-  tb:SetToolDropDown(ID_FINDSETDIR, true)
-  tb:Connect(ID_FINDSETDIR, wxaui.wxEVT_COMMAND_AUITOOLBAR_TOOL_DROPDOWN, function(event)
+  local optseltool = tb:FindTool(ID.FINDOPTSELECTION)
+  if optseltool then
+    optseltool:SetSticky(self.inselection)
+    local ed = self:GetEditor()
+    local inselection = ed and ed:LineFromPosition(ed:GetSelectionStart()) ~= ed:LineFromPosition(ed:GetSelectionEnd())
+    tb:EnableTool(ID.FINDOPTSELECTION, self.inselection or inselection)
+    ctrl:Connect(ID.FINDOPTSELECTION, wx.wxEVT_COMMAND_MENU_SELECTED,
+      function (event)
+        self.inselection = not self.inselection
+        tb:FindTool(event:GetId()):SetSticky(self.inselection)
+        tb:Refresh()
+      end)
+  end
+
+  tb:SetToolDropDown(ID.FINDSETDIR, true)
+  tb:Connect(ID.FINDSETDIR, wxaui.wxEVT_COMMAND_AUITOOLBAR_TOOL_DROPDOWN, function(event)
       if event:IsDropDownClicked() then
-        local menu = wx.wxMenu()
+        local menu = wx.wxMenu({})
         local pos = tb:GetToolRect(event:GetId()):GetBottomLeft()
-        menu:Append(ID_FINDSETDIR, TR("Choose..."))
-        menu:Append(ID_FINDSETTOPROJDIR, TR("Set To Project Directory"))
-        menu:Enable(ID_FINDSETTOPROJDIR, ide:GetProject() ~= nil)
-        menu:Connect(ID_FINDSETTOPROJDIR, wx.wxEVT_COMMAND_MENU_SELECTED,
+        menu:Append(ID.FINDSETDIR, TR("Choose..."))
+        menu:Append(ID.FINDSETTOPROJDIR, TR("Set To Project Directory"))
+        menu:Enable(ID.FINDSETTOPROJDIR, ide:GetProject() ~= nil)
+        menu:Connect(ID.FINDSETTOPROJDIR, wx.wxEVT_COMMAND_MENU_SELECTED,
           function()
             local _, mask = self:GetScope()
             self:refreshToolbar(self:SetScope(ide:GetProject(), mask))
@@ -765,9 +816,9 @@ function findReplace:createToolbar()
             function() self:refreshToolbar(text) end)
         end
         menu:AppendSeparator()
-        menu:Append(ID_RECENTSCOPECLEAR, TR("Clear Items"))
-        menu:Enable(ID_RECENTSCOPECLEAR, #self.settings.slist > 0)
-        menu:Connect(ID_RECENTSCOPECLEAR, wx.wxEVT_COMMAND_MENU_SELECTED,
+        menu:Append(ID.RECENTSCOPECLEAR, TR("Clear Items"))
+        menu:Enable(ID.RECENTSCOPECLEAR, #self.settings.slist > 0)
+        menu:Connect(ID.RECENTSCOPECLEAR, wx.wxEVT_COMMAND_MENU_SELECTED,
           function()
             self.settings.slist = {}
             self:SaveSettings()
@@ -821,10 +872,11 @@ function findReplace:createPanel()
   local textcolor = wx.wxColour(unpack(style.text.fg or styledef.text.fg))
   local backcolor = wx.wxColour(unpack(style.text.bg or styledef.text.bg))
   local pancolor = tb:GetBackgroundColour()
-  local borcolor = ide:GetUIManager():GetArtProvider():GetColor(wxaui.wxAUI_DOCKART_BORDER_COLOUR)
+  local borcolor = ide:GetUIManager():GetArtProvider():GetColour(wxaui.wxAUI_DOCKART_BORDER_COLOUR)
   local bpen = wx.wxPen(borcolor, 1, wx.wxSOLID)
   local bbrush = wx.wxBrush(pancolor, wx.wxSOLID)
-  local tfont = ide:GetProjectTree():GetFont()
+  local tempctrl = ide:IsValidCtrl(ide:GetProjectTree()) and ide:GetProjectTree() or wx.wxTreeCtrl()
+  local tfont = tempctrl:GetFont()
   -- don't increase font size on Linux as it gets too large
   tfont:SetPointSize(tfont:GetPointSize() + (ide.osname == 'Unix' and 0 or 1))
 
@@ -876,7 +928,9 @@ function findReplace:createPanel()
     if findReplace.infiles then
       findReplace:RunInFiles(false)
     else
-      findReplace:Find()
+      local reverse = (wx.wxGetKeyState(wx.WXK_SHIFT)
+          and not wx.wxGetKeyState(wx.WXK_ALT) and not wx.wxGetKeyState(wx.WXK_CONTROL))
+      findReplace:Find(reverse)
     end
   end
 
@@ -913,7 +967,10 @@ function findReplace:createPanel()
   end
 
   local function findIncremental(event)
-    if not self.infiles and self.backfocus then
+    -- don't do any incremental search when search in selection
+    if self.inselection then return end
+
+    if not self.infiles and self.backfocus and self.backfocus.position then
       self:GetEditor():SetSelection(self.backfocus.position, self.backfocus.position)
     end
     -- don't search when used with "infiles", but still trigger autocomplete
@@ -928,7 +985,9 @@ function findReplace:createPanel()
       if findReplace.infiles then
         findReplace:RunInFiles(true)
       else
-        findReplace:Replace()
+        local replaceAll = (wx.wxGetKeyState(wx.WXK_ALT)
+          and not wx.wxGetKeyState(wx.WXK_SHIFT) and not wx.wxGetKeyState(wx.WXK_CONTROL))
+        findReplace:Replace(replaceAll)
       end
     end
   end
@@ -959,7 +1018,7 @@ function findReplace:createPanel()
   ctrl:Connect(wx.wxEVT_ERASE_BACKGROUND, function() end)
 
   local taborder = {findCtrl, replaceCtrl, scope}
-  local function charHandle(event)
+  local function keyHandle(event)
     local keycode = event:GetKeyCode()
     self.ac[event:GetEventObject():DynamicCast('wxTextCtrl'):GetId()].lastkeycode = keycode
     if keycode == wx.WXK_ESCAPE then
@@ -984,23 +1043,40 @@ function findReplace:createPanel()
   end
 
   -- remember the current position in the editor when setting focus on find
+  local function refreshEditorInfo()
+    local ed = self:GetEditor()
+    if ed and ed ~= self.oveditor then
+      local spos, epos = ed:GetSelectionStart(), ed:GetSelectionEnd()
+      if not self.backfocus or self.backfocus.editor ~= ed then
+        self.backfocus = { editor = ed, spos = spos, epos = epos }
+      end
+      local bf = self.backfocus
+      bf.position = spos == epos and ed:GetCurrentPos() or spos
+      local inselection = (ide.config.search.autoinselection
+        and ed:LineFromPosition(spos) ~= ed:LineFromPosition(epos))
+
+      -- when the focus is changed, don't remove current "inselection" status as the
+      -- selection may change to highlight the match; not doing this makes it difficult
+      -- to switch between searching and replacing without losing the current match
+      if inselection and (not self.inselection or bf.spos ~= spos or bf.epos ~= epos) then
+        bf.spos = spos
+        bf.epos = epos
+        self.inselection = inselection
+        self:refreshToolbar()
+      end
+    end
+  end
   findCtrl:Connect(wx.wxEVT_SET_FOCUS,
     function(event)
       event:Skip()
-      local ed = self:GetEditor()
-      if ed and ed ~= self.oveditor then
-        self.backfocus = {
-          editor = ed,
-          position = (ed:GetSelectionStart() == ed:GetSelectionEnd()
-            and ed:GetCurrentPos() or ed:GetSelectionStart())
-        }
-      end
+      refreshEditorInfo()
     end)
   findCtrl:Connect(wx.wxEVT_COMMAND_TEXT_ENTER, findNext)
   findCtrl:Connect(wx.wxEVT_COMMAND_TEXT_UPDATED, findIncremental)
-  findCtrl:Connect(wx.wxEVT_CHAR, charHandle)
+  findCtrl:Connect(wx.wxEVT_KEY_DOWN, keyHandle)
   replaceCtrl:Connect(wx.wxEVT_SET_FOCUS, function(event)
       event:Skip()
+      refreshEditorInfo()
       -- hide the replace hint; should be done with SetHint method,
       -- but it's not yet available in wxlua 2.8.12
       if replaceCtrl:GetValue() == replaceHintText then replaceCtrl:ChangeValue('') end
@@ -1009,7 +1085,7 @@ function findReplace:createPanel()
   replaceCtrl:Connect(wx.wxEVT_COMMAND_TEXT_UPDATED, function(event)
       self.ac[event:GetEventObject():DynamicCast('wxTextCtrl'):GetId()].needautocomplete = true
     end)
-  replaceCtrl:Connect(wx.wxEVT_CHAR, charHandle)
+  replaceCtrl:Connect(wx.wxEVT_KEY_DOWN, keyHandle)
 
   -- autocomplete for find/replace can be done from TEXT_UPDATED event,
   -- but SetSelection doesn't work from TEXT_UPDATED event on Linux,
@@ -1019,18 +1095,20 @@ function findReplace:createPanel()
   replaceCtrl:Connect(wx.wxEVT_IDLE, autoComplete)
 
   scope:Connect(wx.wxEVT_COMMAND_TEXT_ENTER, findNext)
-  scope:Connect(wx.wxEVT_CHAR, charHandle)
+  scope:Connect(wx.wxEVT_KEY_DOWN, keyHandle)
 
   local function notSearching(event) event:Enable(not self.oveditor) end
-  ctrl:Connect(ID_FINDNEXT, wx.wxEVT_UPDATE_UI, notSearching)
-  ctrl:Connect(ID_FINDREPLACENEXT, wx.wxEVT_UPDATE_UI, notSearching)
-  ctrl:Connect(ID_FINDREPLACEALL, wx.wxEVT_UPDATE_UI, notSearching)
+  ctrl:Connect(ID.FIND, wx.wxEVT_UPDATE_UI, notSearching)
+  ctrl:Connect(ID.FINDNEXT, wx.wxEVT_UPDATE_UI, notSearching)
+  ctrl:Connect(ID.FINDREPLACENEXT, wx.wxEVT_UPDATE_UI, notSearching)
+  ctrl:Connect(ID.FINDREPLACEALL, wx.wxEVT_UPDATE_UI, notSearching)
 
-  ctrl:Connect(ID_FINDNEXT, wx.wxEVT_COMMAND_MENU_SELECTED, findNext)
-  ctrl:Connect(ID_FINDREPLACENEXT, wx.wxEVT_COMMAND_MENU_SELECTED, findReplaceNext)
-  ctrl:Connect(ID_FINDREPLACEALL, wx.wxEVT_COMMAND_MENU_SELECTED, findReplaceAll)
+  ctrl:Connect(ID.FIND, wx.wxEVT_COMMAND_MENU_SELECTED, findNext)
+  ctrl:Connect(ID.FINDNEXT, wx.wxEVT_COMMAND_MENU_SELECTED, findNext)
+  ctrl:Connect(ID.FINDREPLACENEXT, wx.wxEVT_COMMAND_MENU_SELECTED, findReplaceNext)
+  ctrl:Connect(ID.FINDREPLACEALL, wx.wxEVT_COMMAND_MENU_SELECTED, findReplaceAll)
 
-  ctrl:Connect(ID_FINDSETDIR, wx.wxEVT_COMMAND_MENU_SELECTED,
+  ctrl:Connect(ID.FINDSETDIR, wx.wxEVT_COMMAND_MENU_SELECTED,
     function()
       local dir, mask = self:GetScope()
       local filePicker = wx.wxDirDialog(ctrl, TR("Choose a search directory"),
@@ -1071,13 +1149,18 @@ function findReplace:refreshPanel(replace, infiles)
   end
 
   local value = self.scope:GetValue()
-  local ed = ide:GetEditor()
-  if ed and (not value or #value == 0) then
-    local doc = ide:GetDocument(ed)
-    local ext = doc:GetFileExt()
+  local ed = self:GetEditor()
+  if not value or #value == 0 then
+    local doc = ed and ide:GetDocument(ed)
+    local ext = doc and doc:GetFileExt() or ""
     local proj = ide:GetProject()
     value = (proj and self:GetScopeMRU(proj..sep) or
       self:SetScope(proj or wx.wxGetCwd(), '*.'..(#ext > 0 and ext or '*')))
+  end
+  if ed then -- check if there is any selection
+    self.backfocus = nil
+    self.inselection = (ide.config.search.autoinselection
+      and ed:LineFromPosition(ed:GetSelectionStart()) ~= ed:LineFromPosition(ed:GetSelectionEnd()))
   end
   self:refreshToolbar(value)
 
@@ -1101,6 +1184,16 @@ function findReplace:refreshPanel(replace, infiles)
   self.findCtrl:SetSelection(-1, -1) -- select the content
 end
 
+function findReplace:RefreshResults(editor)
+  if not ide:IsValidCtrl(editor) or not editor.searchpreview then return end
+
+  self:Show(false, true) -- always show "Find" when refreshing
+  self:SetFind(editor.searchpreview)
+  editor:SetFocus() -- set the focus on the editor as it may be in an inactive tab
+  self.reseditor = editor:DynamicCast("wxStyledTextCtrl") -- show the results in the same tab
+  self:RunInFiles(false) -- only refresh search results, no replace
+end
+
 function findReplace:Show(replace,infiles)
   self:refreshPanel(replace,infiles)
 end
@@ -1118,7 +1211,7 @@ function findReplace:Hide(restorepos)
     local editor = self.backfocus.editor
     -- restore original position for Shift-Esc or failed search
     if restorepos or self.foundString == false then
-      editor:GotoPos(self.backfocus.position)
+      editor:SetSelection(self.backfocus.spos, self.backfocus.epos)
     end
     editor:SetFocus()
   elseif self:IsPreview(self.reseditor) then -- there is a preview, go there
@@ -1147,7 +1240,7 @@ local package = ide:AddPackage('core.findreplace', {
       if editor.replace and isModified then
         findReplace:SetStatus("")
 
-        local line = NOTFOUND
+        local line = wx.wxNOT_FOUND
         local oveditor = ide:CreateStyledTextCtrl(findReplace.panel, wx.wxID_ANY,
           wx.wxDefaultPosition, wx.wxSize(0,0), wx.wxBORDER_NONE)
         local files, lines = 0, 0
@@ -1155,7 +1248,7 @@ local package = ide:AddPackage('core.findreplace', {
         while true do
           -- for each marker that marks a file (MarkerNext)
           line = editor:MarkerNext(line + 1, FILE_MARKER_VALUE)
-          if line == NOTFOUND then break end
+          if line == wx.wxNOT_FOUND then break end
 
           local fname = getRawLine(editor, line) -- get the file name
           local filetext, err = FileRead(fname)
@@ -1164,7 +1257,7 @@ local package = ide:AddPackage('core.findreplace', {
             findReplace:SetStatus(GetFileName(fname))
             wx.wxSafeYield()
 
-            oveditor:SetText(filetext)
+            oveditor:SetTextDyn(filetext)
             while true do -- for each line following the file name
               line = line + 1
               local text = getRawLine(editor, line)
@@ -1173,7 +1266,7 @@ local package = ide:AddPackage('core.findreplace', {
                 lnum = tonumber(lnum)
                 if lmark == ':' then -- if the change line, then apply the change
                   local pos = oveditor:PositionFromLine(lnum-1)
-                  if pos == NOTFOUND then
+                  if pos == wx.wxNOT_FOUND then
                     mismatch = lnum
                     break
                   end
@@ -1193,7 +1286,7 @@ local package = ide:AddPackage('core.findreplace', {
             end
             if lines > 0 and not mismatch then -- save the file
               local ok
-              ok, err = FileWrite(fname, oveditor:GetText())
+              ok, err = FileWrite(fname, oveditor:GetTextDyn())
               if ok then files = files + 1 end
             end
           end
@@ -1203,8 +1296,8 @@ local package = ide:AddPackage('core.findreplace', {
           end
         end
         oveditor:Destroy() -- destroy the editor to release its memory
-        if report then editor:AppendText("\n"..report) end
-        editor:AppendText(("\n\nUpdated %d %s in %d %s.")
+        if report then editor:AppendTextDyn("\n"..report) end
+        editor:AppendTextDyn(("\n\nUpdated %d %s in %d %s.")
           :format(
             lines, makePlural("line", lines),
             files, makePlural("file", files)))

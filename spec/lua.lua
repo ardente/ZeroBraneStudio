@@ -26,6 +26,9 @@ local function isfndef(str)
 end
 local q = EscapeMagic
 
+local PARSE = require 'lua_parser_loose'
+local LEX = require 'lua_lexer_loose'
+
 local function ldoc(tx, typepatt)
   local varname = "([%w_]+)"
   -- <type> == ?string, ?|T1|T2
@@ -51,19 +54,25 @@ return {
   linecomment = "--",
   sep = ".:",
   isdecindent = function(str)
-    str = str:gsub('%-%-%[=*%[.*%]=*%]',''):gsub('%-%-.*','')
+    str = (str
+      :gsub('%[=*%[.-%]=*%]','') -- remove long strings
+      :gsub("%b[]","") -- remove all table indexes
+      :gsub('%[=*%[.*',''):gsub('.*%]=*%]','') -- remove partial long strings
+      :gsub('%-%-.*','') -- strip comments after strings are processed
+      :gsub("%b()","()") -- remove all function calls
+    )
     -- this handles three different cases:
-    local term = (str:match("^%s*(%w+)%s*$")
+    local term = (str:match("^%s*([%w_]+)%s*$")
       or str:match("^%s*(elseif)[%s%(]")
       or str:match("^%s*(until)[%s%(]")
-      or str:match("^%s*(else)%f[%W]")
+      or str:match("^%s*(else)%f[^%w_]")
     )
     -- (1) 'end', 'elseif', 'else', 'until'
     local match = term and decindent[term]
     -- (2) 'end)', 'end}', 'end,', and 'end;'
     if not term then term, match = str:match("^%s*(end)%s*([%)%}]*)%s*[,;]?") end
     -- endFoo could be captured as well; filter it out
-    if term and str:match("^%s*(end)%w") then term = nil end
+    if term and str:match("^%s*(end)[%w_]") then term = nil end
     -- (3) '},', '};', '),' and ');'
     if not term then match = str:match("^%s*[%)%}]+%s*[,;]?%s*$") end
 
@@ -71,45 +80,48 @@ return {
   end,
   isincindent = function(str)
     -- remove "long" comments and escaped slashes (to process \' and \" below)
-    str = str:gsub('%-%-%[=*%[.-%]=*%]',''):gsub('\\[\\\'"]','')
+    str = str:gsub('%-%-%[=*%[.-%]=*%]',' '):gsub('\\[\\\'"]','')
     while true do
       local num, sep = nil, str:match("['\"]")
       if not sep then break end
-      str, num = str:gsub(sep..".-\\"..sep,sep):gsub(sep..".-"..sep,"")
+      str, num = str:gsub(sep..".-\\"..sep,sep):gsub(sep..".-"..sep," ")
       if num == 0 then break end
     end
     str = (str
-      :gsub('%[=*%[.-%]=*%]','') -- remove long strings
-      :gsub('%[=*%[.*','') -- remove partial long strings
+      :gsub('%[=*%[.-%]=*%]',' ') -- remove long strings
+      :gsub('%b[]',' ') -- remove all table indexes
+      :gsub('%[=*%[.*',''):gsub('.*%]=*%]','') -- remove partial long strings
       :gsub('%-%-.*','') -- strip comments after strings are processed
       :gsub("%b()","()") -- remove all function calls
     )
 
-    local term = str:match("^%s*(%w+)%W*")
+    local func = (isfndef(str) or str:match("%f[%w_]function%s*%(")) and 1 or 0
+    local term = str:match("^%s*([%w_]+)%W*")
     local terminc = term and incindent[term] and 1 or 0
     -- fix 'if' not terminated with 'then'
     -- or 'then' not started with 'if'
-    if (term == 'if' or term == 'elseif') and not str:match("%f[%w]then%f[%W]")
-    or (term == 'for') and not str:match("%S%s+do%f[%W]")
-    or (term == 'while') and not str:match("%f[%w]do%f[%W]") then
+    if (term == 'if' or term == 'elseif') and not str:match("%f[%w_]then%f[^%w_]")
+    or (term == 'for') and not str:match("%f[%w_]do%f[^%w_]")
+    or (term == 'while') and not str:match("%f[%w_]do%f[^%w_]")
+    -- or `repeat ... until` are on the same line
+    or (term == 'repeat') and str:match("%f[%w_]until%f[^%w_]")
+    -- if this is a function definition, then don't increment the level
+    or func == 1 then
       terminc = 0
-    elseif not (term == 'if' or term == 'elseif') and str:match("%f[%w]then%f[%W]")
-    or not (term == 'for') and str:match("%S%s+do%f[%W]")
-    or not (term == 'while') and str:match("%f[%w]do%f[%W]") then
+    elseif not (term == 'if' or term == 'elseif') and str:match("%f[%w_]then%f[^%w_]")
+    or not (term == 'for') and str:match("%f[%w_]do%f[^%w_]")
+    or not (term == 'while') and str:match("%f[%w_]do%f[^%w_]") then
       terminc = 1
     end
     local _, opened = str:gsub("([%{%(])", "%1")
     local _, closed = str:gsub("([%}%)])", "%1")
-    local func = (isfndef(str) or str:match("%W+function%s*%(")) and 1 or 0
     -- ended should only be used to negate term and func effects
-    local anon = str:match("%W+function%s*%(.+%Wend%W")
-    local ended = (terminc + func > 0) and (str:match("%W+end%s*$") or anon) and 1 or 0
+    local anon = str:match("%f[%w_]function%s*%(.+[^%w_]end%f[^%w_]")
+    local ended = (terminc + func > 0) and (str:match("[^%w_]+end%s*$") or anon) and 1 or 0
 
     return opened - closed + func + terminc - ended
   end,
   marksymbols = function(code, pos, vars)
-    local PARSE = require 'lua_parser_loose'
-    local LEX = require 'lua_lexer_loose'
     local lx = LEX.lexc(code, nil, pos)
     return coroutine.wrap(function()
       local varnext = {}
@@ -164,6 +176,8 @@ return {
         local var,typ = tx:match("%s*"..identifier.."%s*=%s*([^;]+)")
 
         var = var and var:gsub("local",""):gsub("%s","")
+        -- remove assert() calls as they don't affect their parameter types
+        typ = typ and typ:gsub("assert%s*(%b())", function(s) return s:gsub("^%(",""):gsub("%)$","") end)
         -- handle `require` as a special case that returns a type that matches its parameter
         -- (this is without deeper analysis on loaded files and should work most of the time)
         local req = typ and typ:match("^require%s*%(?%s*['\"](.+)['\"]%s*%)?")
@@ -196,24 +210,10 @@ return {
         end
 
         if (var and typ) then
-          local class,func = typ:match(varname.."["..q(sep).."]"..varname)
           if (assigns[typ] and not req) then
             assigns[var] = assigns[typ]
-          elseif (func) then
-            local added
-            local funcnames = {"new","load","create"}
-            for _,v in ipairs(funcnames) do
-              if (func == v) then
-                assigns[var] = class
-                added = true
-                break
-              end
-            end
-            if (not added) then
-              -- let's hope autocomplete info can resolve this
-              assigns[var] = typ
-            end
           else
+            if req then assigns[req] = nil end
             assigns[var] = typ
           end
         end
@@ -250,15 +250,19 @@ return {
   },
 
   keywords = {
+    -- keywords
     [[and break do else elseif end for function goto if in local not or repeat return then until while false self true nil]],
 
+    -- constants/variables
     [[_G _VERSION _ENV io.stderr io.stdin io.stdout math.huge math.pi
-    package.config package.cpath package.loaded package.loaders package.path package.preload package.searchers]],
+    package.cpath package.path package.searchpath package.seeall package.config package.loaded package.loaders package.preload package.searchers]],
 
+    -- core/global functions
     [[assert collectgarbage dofile error getfenv getmetatable ipairs load loadfile loadstring
       module next pairs pcall print rawequal rawget rawlen rawset require
       select setfenv setmetatable tonumber tostring type unpack xpcall]],
 
+    -- library functions
     [[bit32.arshift bit32.band bit32.bnot bit32.bor bit32.btest bit32.bxor bit32.extract
       bit32.lrotate bit32.lshift bit32.replace bit32.rrotate bit32.rshift
       coroutine.create coroutine.resume coroutine.running coroutine.status coroutine.wrap coroutine.yield
@@ -274,6 +278,7 @@ return {
       math.pow math.rad math.random math.randomseed math.sin math.sinh math.sqrt math.tan math.tanh
       math.type math.tointeger math.maxinteger math.mininteger math.ult
       os.clock os.date os.difftime os.execute os.exit os.getenv os.remove os.rename os.setlocale os.time os.tmpname
+      package.loadlib
       string.byte string.char string.dump string.find string.format string.gmatch string.gsub string.len
       string.lower string.match string.rep string.reverse string.sub string.upper
       byte find format gmatch gsub len lower match rep reverse sub upper

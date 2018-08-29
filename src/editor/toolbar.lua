@@ -1,6 +1,8 @@
--- Copyright 2014-15 Paul Kulchenko, ZeroBrane LLC
+-- Copyright 2014-17 Paul Kulchenko, ZeroBrane LLC
 
 local TR = function(...) return ... end
+
+ide.config.toolbar = ide.config.toolbar or {}
 
 ide.config.toolbar.icons = {
   ID.NEW, ID.OPEN, ID.SAVE, ID.SAVEALL, ID.PROJECTDIRFROMFILE, ID.PROJECTDIRCHOOSE,
@@ -8,10 +10,11 @@ ide.config.toolbar.icons = {
   ID.FIND, ID.REPLACE, ID.FINDINFILES,
   ID.SEPARATOR,
   ID.RUN, ID.STARTDEBUG, ID.RUNNOW, ID.STOPDEBUG, ID.DETACHDEBUG, ID.BREAK,
-    ID.STEP, ID.STEPOVER, ID.STEPOUT, ID.RUNTO,
+  ID.COMPILE, ID.STEP, ID.STEPOVER, ID.STEPOUT, ID.RUNTO,
   ID.SEPARATOR,
-  ID.TOGGLEBREAKPOINT, ID.BOOKMARKTOGGLE, ID.VIEWCALLSTACK, ID.VIEWWATCHWINDOW,
+  ID.BREAKPOINTTOGGLE, ID.BOOKMARKTOGGLE, ID.VIEWCALLSTACK, ID.VIEWWATCHWINDOW,
   [ID.FINDINFILES] = false,
+  [ID.COMPILE] = false,
 }
 
 ide.config.toolbar.iconmap = {
@@ -24,6 +27,7 @@ ide.config.toolbar.iconmap = {
   [ID.FIND] = {"FIND", TR("Find text")},
   [ID.REPLACE] = {"FIND-AND-REPLACE", TR("Find and replace text")},
   [ID.FINDINFILES] = {"FIND-IN-FILES", TR("Find in files")},
+  [ID.COMPILE] = {"COMPILE", TR("Compile the current file")},
   [ID.RUN] = {"RUN", TR("Execute the current project/file")},
   [ID.RUNNOW] = {"RUN-NOW", TR("Run as Scratchpad")},
   [ID.STARTDEBUG] = {"DEBUG-START", TR("Start or continue debugging")},
@@ -34,17 +38,18 @@ ide.config.toolbar.iconmap = {
   [ID.STEP] = {"DEBUG-STEP-INTO", TR("Step into")},
   [ID.STEPOVER] = {"DEBUG-STEP-OVER", TR("Step over")},
   [ID.STEPOUT] = {"DEBUG-STEP-OUT", TR("Step out of the current function")},
-  [ID.TOGGLEBREAKPOINT] = {"DEBUG-BREAKPOINT-TOGGLE", TR("Toggle breakpoint")},
+  [ID.BREAKPOINTTOGGLE] = {"DEBUG-BREAKPOINT-TOGGLE", TR("Toggle breakpoint")},
   [ID.BOOKMARKTOGGLE] = {"BOOKMARK-TOGGLE", TR("Toggle bookmark")},
   [ID.VIEWCALLSTACK] = {"DEBUG-CALLSTACK", TR("View the stack window")},
   [ID.VIEWWATCHWINDOW] = {"DEBUG-WATCH", TR("View the watch window")},
   -- search toolbar
-  [ID.FINDNEXT] = {"FIND", TR("Find")},
+  [ID.FINDNEXT] = {"FIND-NEXT", TR("Find next")},
   [ID.FINDREPLACENEXT] = {"FIND-REPLACE-NEXT", TR("Replace next instance")},
   [ID.FINDREPLACEALL] = {"FIND-AND-REPLACE", TR("Replace all")},
   [ID.FINDSETDIR] = {"FIND-OPT-SETDIR", TR("Set search directory")},
   [ID.FINDOPTDIRECTION] = {"FIND-OPT-DOWN", TR("Search direction")},
   [ID.FINDOPTWRAPWROUND] = {"FIND-OPT-WRAP-AROUND", TR("Wrap around")},
+  [ID.FINDOPTSELECTION] = {"FIND-OPT-SELECTION", TR("Search in selection")},
   [ID.FINDOPTWORD] = {"FIND-OPT-WORD", TR("Match whole word")},
   [ID.FINDOPTCASE] = {"FIND-OPT-CASE-SENSITIVE", TR("Match case")},
   [ID.FINDOPTREGEX] = {"FIND-OPT-REGEX", TR("Regular expression")},

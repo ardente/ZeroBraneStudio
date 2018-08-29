@@ -1,4 +1,4 @@
--- Copyright 2011-14 Paul Kulchenko, ZeroBrane LLC
+-- Copyright 2011-17 Paul Kulchenko, ZeroBrane LLC
 -- authors: Lomtik Software (J. Winwood & John Labenski)
 -- Luxinia Dev (Eike Decker & Christoph Kubisch)
 ---------------------------------------------------------
@@ -14,13 +14,13 @@ local CURRENT_LINE_MARKER = StylesGetMarker("currentline")
 local CURRENT_LINE_MARKER_VALUE = 2^CURRENT_LINE_MARKER
 
 function NewFile(filename)
-  filename = filename or ide.config.default.fullname
+  filename = filename or ide:GetDefaultFileName()
   local editor = CreateEditor()
   editor:SetupKeywords(GetFileExt(filename))
   local doc = AddEditor(editor, filename)
   if doc then
-    PackageEventHandle("onEditorNew", editor)
     SetEditorSelection(doc.index)
+    PackageEventHandle("onEditorNew", editor)
   end
   return editor
 end
@@ -30,7 +30,7 @@ local function findUnusedEditor()
   local editor
   for _, document in pairs(openDocuments) do
     if (document.editor:GetLength() == 0) and
-    (not document.isModified) and (not document.filePath) and
+    (not document:IsModified()) and document:IsNew() and
     not (document.editor:GetReadOnly() == true) then
       editor = document.editor
       break
@@ -41,12 +41,17 @@ end
 
 function LoadFile(filePath, editor, file_must_exist, skipselection)
   filePath = filePath:gsub("%s+$","")
-  filePath = wx.wxFileName(filePath)
-  filePath:Normalize() -- make it absolute and remove all .. and . if possible
-  filePath = filePath:GetFullPath()
 
   -- if the file name is empty or is a directory, don't do anything
   if filePath == '' or wx.wxDirExists(filePath) then return nil end
+
+  filePath = FileNormalizePath(filePath)
+  -- on some Windows versions, normalization doesn't return "original" file name,
+  -- so detect that and use LongPath instead
+  if ide.osname == "Windows" and wx.wxFileExists(filePath)
+  and FileNormalizePath(filePath:upper()) ~= FileNormalizePath(filePath:lower()) then
+    filePath = FileGetLongPath(filePath)
+  end
 
   -- prevent files from being reopened again
   if (not editor) then
@@ -62,6 +67,12 @@ function LoadFile(filePath, editor, file_must_exist, skipselection)
   end
 
   local filesize = FileSize(filePath)
+  if filesize == wx.wxInvalidOffset then
+    -- invalid offset is also reported on empty files with no read access (at least on Windows)
+    ide:ReportError(TR("Can't open file '%s': %s")
+      :format(filePath, "symlink is broken or access is denied."))
+    return nil
+  end
   if not filesize and file_must_exist then return nil end
 
   local current = editor and editor:GetCurrentPos()
@@ -70,13 +81,14 @@ function LoadFile(filePath, editor, file_must_exist, skipselection)
   editor:SetupKeywords(GetFileExt(filePath))
   editor:MarkerDeleteAll(-1)
   if filesize then editor:Allocate(filesize) end
-  editor:SetText("")
+  editor:SetReadOnly(false) -- disable read-only status if set on the editor
+  editor:SetTextDyn("")
   editor.bom = string.char(0xEF,0xBB,0xBF)
 
   local inputfilter = GetConfigIOFilter("input")
   local file_text
   ide:PushStatus("")
-  FileRead(filePath, 1024*1024, function(s)
+  local ok, err = FileRead(filePath, 1024*1024, function(s) -- callback is only called when the file exists
       if not file_text then
         -- remove BOM from UTF-8 encoded files; store BOM to add back when saving
         if s and editor:GetCodePage() == wxstc.wxSTC_CP_UTF8 and s:find("^"..editor.bom) then
@@ -89,12 +101,13 @@ function LoadFile(filePath, editor, file_must_exist, skipselection)
       end
       if inputfilter then s = inputfilter(filePath, s) end
       local expected = editor:GetLength() + #s
-      editor:AppendText(s)
+      editor:AppendTextDyn(s)
       -- if the length is not as expected, then either it's a binary file or invalid UTF8
       if editor:GetLength() ~= expected then
         -- skip binary files with unknown extensions as they may have any sequences
-        if editor.spec == ide.specs.none and IsBinary(s) then
-          DisplayOutputLn(("%s: %s"):format(filePath,
+        -- when using Raw methods, this can only happen for binary files (that include \0 chars)
+        if editor.useraw or editor.spec == ide.specs.none and IsBinary(s) then
+          ide:Print(("%s: %s"):format(filePath,
               TR("Binary file is shown as read-only as it is only partially loaded.")))
           file_text = ''
           editor:SetReadOnly(true)
@@ -106,12 +119,12 @@ function LoadFile(filePath, editor, file_must_exist, skipselection)
         local replacement, invalid = "\022"
         s, invalid = FixUTF8(s, replacement)
         if #invalid > 0 then
-          editor:AppendText(s)
+          editor:AppendTextDyn(s)
           local lastline = nil
           for _, n in ipairs(invalid) do
             local line = editor:LineFromPosition(n)
             if line ~= lastline then
-              DisplayOutputLn(("%s:%d: %s"):format(filePath, line+1,
+              ide:Print(("%s:%d: %s"):format(filePath, line+1,
                   TR("Replaced an invalid UTF8 character with %s."):format(replacement)))
               lastline = line
             end
@@ -123,7 +136,14 @@ function LoadFile(filePath, editor, file_must_exist, skipselection)
         ide:PushStatus(TR("%s%% loaded..."):format(math.floor(100*editor:GetLength()/filesize)))
       end
     end)
+  if not ok then
+    ide:ReportError(TR("Can't open file '%s': %s"):format(filePath, err))
+    return nil
+  end
   ide:PopStatus()
+
+  -- empty or non-existing files don't have bom
+  if not file_text then editor.bom = false end
 
   editor:Colourise(0, -1)
   editor:ResetTokenList() -- reset list of tokens if this is a reused editor
@@ -144,7 +164,7 @@ function LoadFile(filePath, editor, file_must_exist, skipselection)
     local foundlf = (string.find(file_text,"[^\r]\n") ~= nil)
       or (string.find(file_text,"^\n") ~= nil) -- edge case: file beginning with LF and having no other LF
     if foundcrlf and foundlf then -- file with mixed line-endings
-      DisplayOutputLn(("%s: %s")
+      ide:Print(("%s: %s")
         :format(filePath, TR("Mixed end-of-line encodings detected.")..' '..
           TR("Use '%s' to show line endings and '%s' to convert them.")
         :format("ide:GetEditor():SetViewEOL(1)", "ide:GetEditor():ConvertEOLs(ide:GetEditor():GetEOLMode())")))
@@ -161,8 +181,7 @@ function LoadFile(filePath, editor, file_must_exist, skipselection)
   if doc then -- existing editor; switch to the tab
     notebook:SetSelection(doc:GetTabIndex())
   else -- the editor has not been added to notebook
-    doc = AddEditor(editor, wx.wxFileName(filePath):GetFullName()
-      or ide.config.default.fullname)
+    doc = AddEditor(editor, wx.wxFileName(filePath):GetFullName() or ide:GetDefaultFileName())
   end
   doc.filePath = filePath
   doc.fileName = wx.wxFileName(filePath):GetFullName()
@@ -184,13 +203,9 @@ function ReLoadFile(filePath, editor, ...)
   if not editor then return LoadFile(filePath, editor, ...) end
 
   -- save all markers
-  local maskany = 2^24-1
-  local markers = {}
-  local line = editor:MarkerNext(0, maskany)
-  while line > -1 do
-    table.insert(markers, {line, editor:MarkerGet(line), editor:GetLine(line)})
-    line = editor:MarkerNext(line + 1, maskany)
-  end
+  local markers = editor:MarkerGetAll()
+  -- add the current line content to retrieved markers to compare later if needed
+  for _, marker in ipairs(markers) do marker[3] = editor:GetLineDyn(marker[1]) end
   local lines = editor:GetLineCount()
 
   -- load file into the same editor
@@ -198,6 +213,9 @@ function ReLoadFile(filePath, editor, ...)
   if not editor then return end
 
   if #markers > 0 then -- restore all markers
+    -- delete all markers as they may be restored by a different mechanism,
+    -- which may be limited to only restoring some markers
+    editor:MarkerDeleteAll(-1)
     local samelinecount = lines == editor:GetLineCount()
     for _, marker in ipairs(markers) do
       local line, mask, text = unpack(marker)
@@ -207,60 +225,38 @@ function ReLoadFile(filePath, editor, ...)
       else
         -- find matching line in the surrounding area and restore marker there
         for _, l in ipairs({line, line-1, line-2, line+1, line+2}) do
-          if text == editor:GetLine(l) then
+          if text == editor:GetLineDyn(l) then
             editor:MarkerAddSet(l, mask)
             break
           end
         end
       end
     end
+    PackageEventHandle("onEditorMarkerUpdate", editor)
   end
 
   return editor
 end
 
-function ActivateFile(filename)
-  local name, suffix, value = filename:match('(.+):([lLpP]?)(%d+)$')
-  if name and not wx.wxFileExists(filename) then filename = name end
-
-  -- check if non-existing file can be loaded from the project folder;
-  -- this is to handle: "project file" used on the command line
-  if not wx.wxFileExists(filename) and not wx.wxIsAbsolutePath(filename) then
-    filename = GetFullPathIfExists(ide:GetProject(), filename) or filename
-  end
-
-  local opened = LoadFile(filename, nil, true)
-  if opened and value then
-    if suffix:upper() == 'P' then opened:GotoPosDelayed(tonumber(value))
-    else opened:GotoPosDelayed(opened:PositionFromLine(value-1))
-    end
-  end
-  return opened
-end
-
-local function getExtsString()
-  local exts = ide:GetKnownExtensions()
+local function getExtsString(ed)
+  local exts = ed and ed.spec and ed.spec.exts or {}
   local knownexts = #exts > 0 and "*."..table.concat(exts, ";*.") or nil
   return (knownexts and TR("Known Files").." ("..knownexts..")|"..knownexts.."|" or "")
   .. TR("All files").." (*)|*"
 end
 
-function ReportError(msg)
-  return wx.wxMessageBox(msg, TR("Error"), wx.wxICON_ERROR + wx.wxOK + wx.wxCENTRE, ide.frame)
-end
-
 function OpenFile(event)
-  local editor = GetEditor()
+  local editor = ide:GetEditor()
   local path = editor and ide:GetDocument(editor):GetFilePath() or nil
   local fileDialog = wx.wxFileDialog(ide.frame, TR("Open file"),
-    (path and GetPathWithSep(path) or FileTreeGetDir() or ""),
+    (path and GetPathWithSep(path) or ide:GetProject() or ""),
     "",
-    getExtsString(),
+    getExtsString(editor),
     wx.wxFD_OPEN + wx.wxFD_FILE_MUST_EXIST + wx.wxFD_MULTIPLE)
   if fileDialog:ShowModal() == wx.wxID_OK then
     for _, path in ipairs(fileDialog:GetPaths()) do
       if not LoadFile(path, nil, true) then
-        ReportError(TR("Unable to load file '%s'."):format(path))
+        ide:ReportError(TR("Unable to load file '%s'."):format(path))
       end
     end
   end
@@ -282,13 +278,13 @@ function SaveFile(editor, filePath)
     if ide.config.savebak then
       local ok, err = FileRename(filePath, filePath..".bak")
       if not ok then
-        ReportError(TR("Unable to save file '%s': %s"):format(filePath..".bak", err))
+        ide:ReportError(TR("Unable to save file '%s': %s"):format(filePath..".bak", err))
         return
       end
     end
 
     local st = ((editor:GetCodePage() == wxstc.wxSTC_CP_UTF8 and editor.bom or "")
-      .. editor:GetText())
+      .. editor:GetTextDyn())
     if GetConfigIOFilter("output") then
       st = GetConfigIOFilter("output")(filePath,st)
     end
@@ -300,7 +296,6 @@ function SaveFile(editor, filePath)
       doc.filePath = filePath
       doc.fileName = wx.wxFileName(filePath):GetFullName()
       doc.modTime = GetFileModTime(filePath)
-      doc:SetModified(false)
       doc:SetTabText(doc:GetFileName())
       SetAutoRecoveryMark()
       FileTreeMarkSelected(filePath)
@@ -309,7 +304,7 @@ function SaveFile(editor, filePath)
 
       return true
     else
-      ReportError(TR("Unable to save file '%s': %s"):format(filePath, err))
+      ide:ReportError(TR("Unable to save file '%s': %s"):format(filePath, err))
     end
   end
 
@@ -319,7 +314,7 @@ end
 function ApproveFileOverwrite()
   return wx.wxMessageBox(
     TR("File already exists.").."\n"..TR("Do you want to overwrite it?"),
-    GetIDEString("editormessage"),
+    ide:GetProperty("editormessage"),
     wx.wxYES_NO + wx.wxCENTRE, ide.frame) == wx.wxYES
 end
 
@@ -327,7 +322,7 @@ function SaveFileAs(editor)
   local id = editor:GetId()
   local saved = false
   local filePath = (openDocuments[id].filePath
-    or ((FileTreeGetDir() or "")
+    or ((ide:GetProject() or "")
         ..(openDocuments[id].fileName or ide.config.default.name)))
 
   local fn = wx.wxFileName(filePath)
@@ -344,7 +339,7 @@ function SaveFileAs(editor)
     fn:GetPath(wx.wxPATH_GET_VOLUME),
     fn:GetFullName(),
     -- specify the current extension plus all other extensions based on specs
-    (ext and #ext > 0 and "*."..ext.."|*."..ext.."|" or "")..getExtsString(),
+    (ext and #ext > 0 and "*."..ext.."|*."..ext.."|" or "")..getExtsString(editor),
     wx.wxFD_SAVE)
 
   if fileDialog:ShowModal() == wx.wxID_OK then
@@ -358,14 +353,8 @@ function SaveFileAs(editor)
 
     if cansave and SaveFile(editor, filePath) then
       SetEditorSelection() -- update title of the editor
-      if ext ~= GetFileExt(filePath) then
-        -- new extension, so setup new keywords and re-apply indicators
-        editor:ClearDocumentStyle() -- remove styles from the document
-        editor:SetupKeywords(GetFileExt(filePath))
-        IndicateAll(editor)
-        IndicateFunctionsOnly(editor)
-        MarkupStyle(editor)
-      end
+      -- new extension, this will reset keywords and indicators
+      if ext ~= GetFileExt(filePath) then LoadFile(filePath, editor) end
       saved = true
 
       if existing then
@@ -389,8 +378,8 @@ function SaveAll(quiet)
     local editor = document.editor
     local filePath = document.filePath
 
-    if (document.isModified or not document.filePath) -- need to save
-    and (document.filePath or not quiet) then -- have path or can ask user
+    if (document:IsModified() or document:IsNew()) -- need to save
+    and (filePath or not quiet) then -- have path or can ask user
       SaveFile(editor, filePath) -- will call SaveFileAs if necessary
     end
   end
@@ -445,7 +434,7 @@ local function removePage(index)
 end
 
 function ClosePage(selection)
-  local editor = GetEditor(selection)
+  local editor = ide:GetEditor(selection)
   local id = editor:GetId()
 
   if PackageEventHandle("onEditorPreClose", editor) == false then
@@ -454,23 +443,23 @@ function ClosePage(selection)
 
   if SaveModifiedDialog(editor, true) ~= wx.wxID_CANCEL then
     DynamicWordsRemoveAll(editor)
-    local debugger = ide.debugger
+    local debugger = ide:GetDebugger()
     -- check if the window with the scratchpad running is being closed
     if debugger and debugger.scratchpad and debugger.scratchpad.editors
     and debugger.scratchpad.editors[editor] then
-      DebuggerScratchpadOff()
+      debugger:ScratchpadOff()
     end
     -- check if the debugger is running and is using the current window;
     -- abort the debugger if the current marker is in the window being closed
-    if debugger and debugger.server and
+    if debugger and debugger:IsConnected() and
       (editor:MarkerNext(0, CURRENT_LINE_MARKER_VALUE) >= 0) then
-      debugger.terminate()
+      debugger:Stop()
     end
     PackageEventHandle("onEditorClose", editor)
     removePage(ide.openDocuments[id].index)
 
     -- disable full screen if the last tab is closed
-    if not (notebook:GetSelection() >= 0) then ShowFullScreen(false) end
+    if not (notebook:GetSelection() >= 0) then ide:ShowFullScreen(false) end
     return true
   end
   return false
@@ -495,13 +484,11 @@ end
 -- returns wxID_YES, wxID_NO, or wxID_CANCEL if allow_cancel
 function SaveModifiedDialog(editor, allow_cancel)
   local result = wx.wxID_NO
-  local id = editor:GetId()
-  local document = openDocuments[id]
-  local filePath = document.filePath
-  local fileName = document.fileName
-  if document.isModified then
+  local document = ide:GetDocument(editor)
+  if document:IsModified() then
+    document:GetEditor():SetFocus()
     local message = TR("Do you want to save the changes to '%s'?")
-      :format(fileName or ide.config.default.name)
+      :format(document:GetFileName() or ide.config.default.name)
     local dlg_styles = wx.wxYES_NO + wx.wxCENTRE + wx.wxICON_QUESTION
     if allow_cancel then dlg_styles = dlg_styles + wx.wxCANCEL end
     local dialog = wx.wxMessageDialog(ide.frame, message,
@@ -510,7 +497,7 @@ function SaveModifiedDialog(editor, allow_cancel)
     result = dialog:ShowModal()
     dialog:Destroy()
     if result == wx.wxID_YES then
-      if not SaveFile(editor, filePath) then
+      if not document:Save() then
         return wx.wxID_CANCEL -- cancel if canceled save dialog
       end
     end
@@ -530,7 +517,7 @@ function SaveOnExit(allow_cancel)
   -- are still modified as not modified (they don't need to be saved)
   -- to keep their tab names correct
   for _, document in pairs(openDocuments) do
-    if document.isModified then document:SetModified(false) end
+    if document:IsModified() then document:SetModified(false) end
   end
 
   return true
@@ -566,7 +553,7 @@ function CompileProgram(editor, params)
   }
   local doc = ide:GetDocument(editor)
   local filePath = doc:GetFilePath() or doc:GetFileName()
-  local func, err = loadstring(StripShebang(editor:GetText()), '@'..filePath)
+  local func, err = loadstring(StripShebang(editor:GetTextDyn()), '@'..filePath)
   local line = not func and tonumber(err:match(":(%d+)%s*:")) or nil
 
   if not params.keepoutput then ClearOutput() end
@@ -575,16 +562,16 @@ function CompileProgram(editor, params)
   if func then
     compileOk = compileOk + 1
     if params.reportstats then
-      DisplayOutputLn(TR("Compilation successful; %.0f%% success rate (%d/%d).")
+      ide:Print(TR("Compilation successful; %.0f%% success rate (%d/%d).")
         :format(compileOk/compileTotal*100, compileOk, compileTotal))
     end
   else
-    ActivateOutput()
-    DisplayOutputLn(TR("Compilation error").." "..TR("on line %d"):format(line)..":")
-    DisplayOutputLn((err:gsub("\n$", "")))
+    ide:GetOutput():Activate()
+    ide:Print(TR("Compilation error").." "..TR("on line %d"):format(line)..":")
+    ide:Print((err:gsub("\n$", "")))
     -- check for escapes invalid in LuaJIT/Lua 5.2 that are allowed in Lua 5.1
     if err:find('invalid escape sequence') then
-      local s = editor:GetLine(line-1)
+      local s = editor:GetLineDyn(line-1)
       local cleaned = s
         :gsub('\\[abfnrtv\\"\']', '  ')
         :gsub('(\\x[0-9a-fA-F][0-9a-fA-F])', function(s) return string.rep(' ', #s) end)
@@ -592,7 +579,7 @@ function CompileProgram(editor, params)
         :gsub('(\\z%s*)', function(s) return string.rep(' ', #s) end)
       local invalid = cleaned:find("\\")
       if invalid then
-        DisplayOutputLn(TR("Consider removing backslash from escape sequence '%s'.")
+        ide:Print(TR("Consider removing backslash from escape sequence '%s'.")
           :format(s:sub(invalid,invalid+1)))
       end
     end
@@ -608,10 +595,10 @@ end
 -- Save & Close
 
 function SaveIfModified(editor)
-  local id = editor:GetId()
-  if openDocuments[id].isModified then
+  local doc = ide:GetDocument(editor)
+  if doc:IsModified() or doc:IsNew() then
     local saved = false
-    if not openDocuments[id].filePath then
+    if doc:IsNew() then
       local ret = wx.wxMessageBox(
         TR("You must save the program first.").."\n"..TR("Press cancel to abort."),
         TR("Save file?"), wx.wxOK + wx.wxCANCEL + wx.wxCENTRE, ide.frame)
@@ -619,14 +606,9 @@ function SaveIfModified(editor)
         saved = SaveFileAs(editor)
       end
     else
-      saved = SaveFile(editor, openDocuments[id].filePath)
+      saved = doc:Save()
     end
-
-    if saved then
-      openDocuments[id].isModified = false
-    else
-      return false -- not saved
-    end
+    return saved
   end
 
   return true -- saved
@@ -647,7 +629,7 @@ function GetOpenFiles()
   -- to keep tab order
   table.sort(opendocs,function(a,b) return (a.id < b.id) end)
 
-  local id = GetEditor()
+  local id = ide:GetEditor()
   id = id and id:GetId()
   return opendocs, {index = (id and openDocuments[id].index or 0)}
 end
@@ -661,46 +643,6 @@ function SetOpenFiles(nametab,params)
   SetEditorSelection()
 end
 
-local beforeFullScreenPerspective
-local statusbarShown
-
-function ShowFullScreen(setFullScreen)
-  if setFullScreen then
-    beforeFullScreenPerspective = uimgr:SavePerspective()
-
-    local panes = frame.uimgr:GetAllPanes()
-    for index = 0, panes:GetCount()-1 do
-      local name = panes:Item(index).name
-      if name ~= "notebook" then frame.uimgr:GetPane(name):Hide() end
-    end
-    uimgr:Update()
-    SetEditorSelection() -- make sure the focus is on the editor
-  elseif beforeFullScreenPerspective then
-    uimgr:LoadPerspective(beforeFullScreenPerspective, true)
-    beforeFullScreenPerspective = nil
-  end
-
-  -- On OSX, status bar is not hidden when switched to
-  -- full screen: http://trac.wxwidgets.org/ticket/14259; do manually.
-  -- need to turn off before showing full screen and turn on after,
-  -- otherwise the window is restored incorrectly and is reduced in size.
-  if ide.osname == 'Macintosh' and setFullScreen then
-    statusbarShown = frame:GetStatusBar():IsShown()
-    frame:GetStatusBar():Hide()
-  end
-
-  -- protect from systems that don't have ShowFullScreen (GTK on linux?)
-  pcall(function() frame:ShowFullScreen(setFullScreen) end)
-
-  if ide.osname == 'Macintosh' and not setFullScreen then
-    if statusbarShown then
-      frame:GetStatusBar():Show()
-      -- refresh AuiManager as the statusbar may be shown below the border
-      uimgr:Update()
-    end
-  end
-end
-
 function ProjectConfig(dir, config)
   if config then ide.session.projects[dir] = config
   else return unpack(ide.session.projects[dir] or {}) end
@@ -708,29 +650,27 @@ end
 
 function SetOpenTabs(params)
   local recovery, nametab = LoadSafe("return "..params.recovery)
-  if not recovery then
-    DisplayOutputLn(TR("Can't process auto-recovery record; invalid format: %s."):format(nametab))
+  if not recovery or not nametab then
+    ide:Print(TR("Can't process auto-recovery record; invalid format: %s."):format(nametab or "unknown"))
     return
   end
   if not params.quiet then
-    DisplayOutputLn(TR("Found auto-recovery record and restored saved session."))
+    ide:Print(TR("Found auto-recovery record and restored saved session."))
   end
   for _,doc in ipairs(nametab) do
     -- check for missing file if no content is stored
     if doc.filepath and not doc.content and not wx.wxFileExists(doc.filepath) then
-      DisplayOutputLn(TR("File '%s' is missing and can't be recovered.")
-        :format(doc.filepath))
+      ide:Print(TR("File '%s' is missing and can't be recovered."):format(doc.filepath))
     else
       local editor = (doc.filepath and LoadFile(doc.filepath,nil,true,true)
         or findUnusedEditor() or NewFile(doc.filename))
       local opendoc = ide:GetDocument(editor)
       if doc.content then
-        editor:SetText(doc.content)
+        editor:SetTextDyn(doc.content)
         if doc.filepath and opendoc.modTime and doc.modified < opendoc.modTime:GetTicks() then
-          DisplayOutputLn(TR("File '%s' has more recent timestamp than restored '%s'; please review before saving.")
+          ide:Print(TR("File '%s' has more recent timestamp than restored '%s'; please review before saving.")
             :format(doc.filepath, opendoc:GetTabText()))
         end
-        opendoc:SetModified(true)
       end
       editor:GotoPosDelayed(doc.cursorpos or 0)
     end
@@ -747,8 +687,9 @@ local function getOpenTabs()
       filename = document:GetFileName(),
       filepath = document:GetFilePath(),
       tabname = document:GetTabText(),
-      modified = document:GetModTime() and document:GetModTime():GetTicks(), -- get number of seconds
-      content = document:IsModified() and editor:GetText() or nil,
+      -- get number of seconds
+      modified = document:GetFileModifiedTime() and document:GetFileModifiedTime():GetTicks(),
+      content = document:IsModified() and editor:GetTextDyn() or nil,
       id = document:GetTabIndex(),
       cursorpos = editor:GetCurrentPos()})
   end
@@ -756,7 +697,7 @@ local function getOpenTabs()
   -- to keep tab order
   table.sort(opendocs, function(a,b) return (a.id < b.id) end)
 
-  local ed = GetEditor()
+  local ed = ide:GetEditor()
   local doc = ed and ide:GetDocument(ed)
   return opendocs, {index = (doc and doc:GetTabIndex() or 0)}
 end
@@ -765,14 +706,10 @@ function SetAutoRecoveryMark()
   ide.session.lastupdated = os.time()
 end
 
-local function generateRecoveryRecord(opentabs)
-  return require('mobdebug').line(opentabs, {comment = false})
-end
-
 local function saveHotExit()
   local opentabs, params = getOpenTabs()
   if #opentabs > 0 then
-    params.recovery = generateRecoveryRecord(opentabs)
+    params.recovery = DumpPlain(opentabs)
     params.quiet = true
     SettingsSaveFileSession({}, params)
   end
@@ -792,7 +729,7 @@ local function saveAutoRecovery(force)
   -- find all open modified files and save them
   local opentabs, params = getOpenTabs()
   if #opentabs > 0 then
-    params.recovery = generateRecoveryRecord(opentabs)
+    params.recovery = DumpPlain(opentabs)
     SettingsSaveAll()
     SettingsSaveFileSession({}, params)
     ide.settings:Flush()
@@ -810,9 +747,9 @@ local function fastWrap(func, ...)
   SetEditorSelection = SES
 end
 
-function StoreRestoreProjectTabs(curdir, newdir)
+function StoreRestoreProjectTabs(curdir, newdir, intfname)
   local win = ide.osname == 'Windows'
-  local interpreter = ide.interpreter.fname
+  local interpreter = intfname or ide.interpreter.fname
   local current, closing, restore = notebook:GetSelection(), 0, false
 
   if ide.osname ~= 'Macintosh' then notebook:Freeze() end
@@ -893,15 +830,16 @@ local function closeWindow(event)
     return
   end
 
-  ShowFullScreen(false)
+  ide:ShowFullScreen(false)
 
+  if ide:GetProject() then PackageEventHandle("onProjectClose", ide:GetProject()) end
   PackageEventHandle("onAppClose")
 
   -- first need to detach all processes IDE has launched as the current
   -- process is likely to terminate before child processes are terminated,
   -- which may lead to a crash when EVT_END_PROCESS event is called.
   DetachChildProcess()
-  DebuggerShutdown()
+  ide:GetDebugger():Shutdown()
 
   SettingsSaveAll()
   if ide.config.hotexit then saveHotExit() end
@@ -918,14 +856,30 @@ local function closeWindow(event)
   frame.uimgr:UnInit()
   frame:Hide() -- hide the main frame while the IDE exits
 
+  wx.wxClipboard:Get():Flush() -- keep the clipboard content after exit
+
   -- stop all the timers
   for _, timer in pairs(ide.timers) do timer:Stop() end
+  wx.wxGetApp():Disconnect(wx.wxEVT_TIMER)
 
   event:Skip()
+
+  PackageEventHandle("onAppShutdown")
 end
 frame:Connect(wx.wxEVT_CLOSE_WINDOW, closeWindow)
 
-frame:Connect(wx.wxEVT_TIMER, function() saveAutoRecovery() end)
+local function restoreFocus()
+  -- check if the window is shown before returning focus to it,
+  -- as it may lead to a recursion in event handlers on OSX (wxwidgets 2.9.5).
+  if ide:IsWindowShown(ide.infocus) then
+    ide.infocus:SetFocus()
+    -- if switching to the editor, then also call SetSTCFocus,
+    -- otherwise the cursor is not shown in the editor on OSX.
+    if ide.infocus:GetClassInfo():GetClassName() == "wxStyledTextCtrl" then
+      ide.infocus:DynamicCast("wxStyledTextCtrl"):SetSTCFocus(true)
+    end
+  end
+end
 
 -- in the presence of wxAuiToolbar, when (1) the app gets focus,
 -- (2) a floating panel is closed or (3) a toolbar dropdown is closed,
@@ -944,10 +898,8 @@ ide.editorApp:Connect(wx.wxEVT_SET_FOCUS, function(event)
   if win then
     local class = win:GetClassInfo():GetClassName()
     -- don't set focus on the main frame or toolbar
-    if ide.infocus and (class == 'wxAuiToolBar' or class == 'wxFrame') then
-      -- check if the window is shown before returning focus to it,
-      -- as it may lead to a recursion in event handlers on OSX (wxwidgets 2.9.5).
-      pcall(function() if ide:IsWindowShown(ide.infocus) then ide.infocus:SetFocus() end end)
+    if ide.infocus and (class == "wxAuiToolBar" or class == "wxFrame") then
+      pcall(restoreFocus)
       return
     end
 
@@ -960,14 +912,15 @@ ide.editorApp:Connect(wx.wxEVT_SET_FOCUS, function(event)
     local parent = win:GetParent()
     while parent do
       local class = parent:GetClassInfo():GetClassName()
-      if (class == 'wxFrame' or class:find('^wx.*Dialog$'))
+      if (class == "wxFrame" or class:find("^wx.*Dialog$"))
       and parent:GetId() ~= frameid then
         mainwin = false; break
       end
       parent = parent:GetParent()
     end
     if mainwin then
-      if ide.infocus and ide.infocus ~= win and ide.osname == 'Macintosh' then
+      if ide.osname == "Macintosh"
+      and ide:IsValidCtrl(ide.infocus) and ide.infocus:DynamicCast("wxWindow") ~= win then
         -- kill focus on the control that had the focus as wxwidgets on OSX
         -- doesn't do it: http://trac.wxwidgets.org/ticket/14142;
         -- wrap into pcall in case the window is already deleted
@@ -987,14 +940,12 @@ wx.wxUpdateUIEvent.SetUpdateInterval(updateInterval)
 ide.editorApp:Connect(wx.wxEVT_ACTIVATE_APP,
   function(event)
     if not ide.exitingProgram then
-      if ide.osname == 'Macintosh' and ide.infocus and event:GetActive() then
-        -- restore focus to the last element that received it;
-        -- wrap into pcall in case the element has disappeared
-        -- while the application was out of focus
-        pcall(function() if ide:IsWindowShown(ide.infocus) then ide.infocus:SetFocus() end end)
-      end
-
       local active = event:GetActive()
+      -- restore focus to the last element that received it;
+      -- wrap into pcall in case the element has disappeared
+      -- while the application was out of focus
+      if ide.osname == "Macintosh" and active and ide.infocus then pcall(restoreFocus) end
+
       -- save auto-recovery record when making the app inactive
       if not active then saveAutoRecovery(true) end
 
@@ -1008,7 +959,7 @@ ide.editorApp:Connect(wx.wxEVT_ACTIVATE_APP,
   end)
 
 if ide.config.autorecoverinactivity then
-  ide.timers.session = wx.wxTimer(frame)
+  ide.timers.session = ide:AddTimer(frame, function() saveAutoRecovery() end)
   -- check at least 5s to be never more than 5s off
   ide.timers.session:Start(math.min(5, ide.config.autorecoverinactivity)*1000)
 end
@@ -1028,15 +979,18 @@ end
 local cma, cman = 0, 1
 frame:Connect(wx.wxEVT_IDLE,
   function(event)
-    local debugger = ide.debugger
-    if (debugger.update) then debugger.update() end
-    if (debugger.scratchpad) then DebuggerRefreshScratchpad() end
+    if ide:GetDebugger():Update() then event:RequestMore(true) end
+    -- there is a chance that the current debugger can change after `Update` call
+    -- (as the debugger may be suspended during initial socket connection),
+    -- so retrieve the current debugger again to make sure it's properly set up.
+    local debugger = ide:GetDebugger()
+    if (debugger.scratchpad) then debugger:ScratchpadRefresh() end
     if IndicateIfNeeded() then event:RequestMore(true) end
     PackageEventHandleOnce("onIdleOnce", event)
     PackageEventHandle("onIdle", event)
 
     -- process onidle events if any
-    if #ide.onidle > 0 then table.remove(ide.onidle)() end
+    if #ide.onidle > 0 then table.remove(ide.onidle, 1)() end
     if #ide.onidle > 0 then event:RequestMore(true) end -- request more if anything left
 
     if ide.config.showmemoryusage then

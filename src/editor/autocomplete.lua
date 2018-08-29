@@ -1,4 +1,4 @@
--- Copyright 2011-15 Paul Kulchenko, ZeroBrane LLC
+-- Copyright 2011-17 Paul Kulchenko, ZeroBrane LLC
 -- authors: Luxinia Dev (Eike Decker & Christoph Kubisch)
 ---------------------------------------------------------
 
@@ -63,13 +63,13 @@ local function addAPI(ftype, fname) -- relative to API directory
   else
     local fn, err = loadfile(api)
     if err then
-      DisplayOutputLn(TR("Error while loading API file: %s"):format(err))
+      ide:Print(TR("Error while loading API file: %s"):format(err))
       return
     end
     local suc
-    suc, res = pcall(function() return fn(env.ac.childs) end)
+    suc, res = pcall(fn, env.ac.childs)
     if (not suc) then
-      DisplayOutputLn(TR("Error while processing API file: %s"):format(res))
+      ide:Print(TR("Error while processing API file: %s"):format(res))
       return
     end
     -- cache the result
@@ -87,20 +87,6 @@ local function loadallAPIs(only, subapis, known)
       for fname in pairs(v) do
         if (not subapis or subapis[fname]) then addAPI(ftype, fname) end
       end
-    end
-  end
-end
-
-local function scanAPIs()
-  for _, file in ipairs(FileSysGetRecursive("api", true, "*.lua")) do
-    if not IsDirectory(file) then
-      local ftype, fname = file:match("api[/\\]([^/\\]+)[/\\](.*)%.")
-      if not ftype or not fname then
-        DisplayOutputLn(TR("The API file must be located in a subdirectory of the API directory."))
-        return
-      end
-      ide.apis[ftype] = ide.apis[ftype] or {}
-      ide.apis[ftype][fname] = file
     end
   end
 end
@@ -211,13 +197,40 @@ local function resolveAssign(editor,tx)
   local function getclass(tab,a)
     local key,rest = a:match("([%w_]+)"..anysep.."(.*)")
     key = tonumber(key) or key -- make this work for childs[0]
-    if (key and rest and tab.childs and tab.childs[key]) then
-      return getclass(tab.childs[key],rest)
+
+    if (key and rest and tab.childs) then
+      if (tab.childs[key]) then
+        return getclass(tab.childs[key],rest)
+      end
+      -- walk inheritance if we weren't in childs
+      if tab.inherits then
+        local bestTab = tab
+        local bestRest = a
+        for base in tab.inherits:gmatch("[%w_"..q(sep).."]+") do
+          local tab = ac
+          -- map "a.b.c" to class hierarchy (a.b.c)
+          for class in base:gmatch("[%w_]+") do tab = tab.childs[class] end
+          if tab then
+              local t,r = getclass(tab, a)
+              if (string.len(r) < string.len(bestRest)) then
+                 --we found a better match
+                 bestTab = t
+                 bestRest = r
+              end
+          end
+        end
+        -- did we find anything good in our inherits, then return it
+        if string.len(bestRest) < string.len(a) then
+          return bestTab, bestRest
+        end
+      end
     end
+
     -- process valuetype, but only if it doesn't reference the current tab
     if (tab.valuetype and tab ~= ac.childs[tab.valuetype]) then
       return getclass(ac,tab.valuetype..sep:sub(1,1)..a)
     end
+
     return tab,a
   end
 
@@ -229,7 +242,7 @@ local function resolveAssign(editor,tx)
       -- abort the check if the auto-complete is taking too long
       if n > 50 and os.clock() > stopat then
         if ide.config.acandtip.warning then
-          DisplayOutputLn("Warning: Auto-complete was aborted after taking too long to complete."
+          ide:Print("Warning: Auto-complete was aborted after taking too long to complete."
             .. " Please report this warning along with the text you were typing to support@zerobrane.com.")
         end
         break
@@ -247,15 +260,16 @@ local function resolveAssign(editor,tx)
         classname = classname or assigns[c..w]
         if (s ~= "" and old ~= classname) then
           -- continue checking unless this can lead to recursive substitution
-          change = not classname:find("^"..w) and not classname:find("^"..c..w)
+          if refs[w] then change = false; break end
           c = classname..s
         else
           c = c..w..s
         end
+        refs[w] = true
       end
       -- check for loops in type assignment
       if refs[tx] then break end
-      refs[tx] = c
+      refs[tx] = true
       tx = c
       -- if there is any class duplication, abort the loop
       if classname and select(2, c:gsub(classname, classname)) > 1 then break end
@@ -279,9 +293,9 @@ function GetTipInfo(editor, content, short, fullmatch)
   local sep = editor.spec.sep
   local anysep = "["..q(sep).."]"
 
-  local caller = content:match("([%w_]+)%(?%s*$")
+  local caller = content:match("([%w_]+)%s*%(?%s*$")
   local class = (tab and tab.classname
-    or caller and content:match("([%w_]+)"..anysep..caller.."%(?%s*$") or "")
+    or caller and content:match("([%w_]+)"..anysep..caller.."%s*%(?%s*$") or "")
   local tip = editor.api.tip
 
   local classtab = short and tip.shortfinfoclass or tip.finfoclass
@@ -299,13 +313,28 @@ function GetTipInfo(editor, content, short, fullmatch)
   return res and #res > 0 and res or nil
 end
 
-local function reloadAPI(only,subapis)
-  newAPI(apis[only])
-  loadallAPIs(only,subapis)
+local function reloadAPI(only, subapis, known)
+  if only then newAPI(apis[only]) end
+  loadallAPIs(only, subapis, known)
   generateAPIInfo(only)
 end
 
-function ReloadLuaAPI()
+function ReloadAPIs(group, known)
+  -- special case to reload all
+  if group == "*" then
+    if not known then
+      known = {}
+      for _, spec in pairs(ide.specs) do
+        if (spec.apitype) then
+          known[spec.apitype] = true
+        end
+      end
+      -- by default load every known api except lua
+      known.lua = false
+    end
+    reloadAPI(nil, nil, known)
+    return
+  end
   local interp = ide.interpreter
   local cfgapi = ide.config.api
   local fname = interp and interp.fname
@@ -317,22 +346,7 @@ function ReloadLuaAPI()
   for _, v in ipairs(type(intapi) == 'table' and intapi or {}) do apinames[v] = true end
   -- interpreter APIs
   for _, v in ipairs(interp and interp.api or {}) do apinames[v] = true end
-  reloadAPI("lua",apinames)
-end
-
-do
-  local known = {}
-  for _, spec in pairs(ide.specs) do
-    if (spec.apitype) then
-      known[spec.apitype] = true
-    end
-  end
-  -- by defaul load every known api except lua
-  known.lua = false
-
-  scanAPIs()
-  loadallAPIs(nil,nil,known)
-  generateAPIInfo()
+  reloadAPI(group, apinames, known)
 end
 
 -------------
@@ -391,7 +405,7 @@ function DynamicWordsReset ()
 end
 
 local function getEditorLines(editor,line,numlines)
-  return editor:GetTextRange(
+  return editor:GetTextRangeDyn(
     editor:PositionFromLine(line),editor:PositionFromLine(line+numlines+1))
 end
 
@@ -417,7 +431,7 @@ end
 
 function DynamicWordsRemoveAll(editor)
   if ide.config.acandtip.nodynwords then return end
-  DynamicWordsRem(editor,editor:GetText())
+  DynamicWordsRem(editor,editor:GetTextDyn())
 end
 
 ------------
@@ -510,7 +524,7 @@ local function getAutoCompApiList(childs,fragment,method)
     end
   end
 
-  return t
+  return t[fragment] or {}
 end
 
 function CreateAutoCompList(editor,key,pos)
@@ -552,14 +566,14 @@ function CreateAutoCompList(editor,key,pos)
       local tab = ac
       -- map "a.b.c" to class hierarchy (a.b.c)
       for class in base:gmatch("[%w_]+") do tab = tab.childs[class] end
-
+  
       if tab and not seen[tab] then
         seen[tab] = true
         for _,v in pairs(getAutoCompApiList(tab.childs,rest,method)) do
           table.insert(apilist, v)
         end
         addInheritance(tab, apilist, seen)
-      end
+    end
     end
   end
 
@@ -570,18 +584,21 @@ function CreateAutoCompList(editor,key,pos)
   if ide.config.acandtip.symbols and not key:find(q(sep)) then
     local vars, context = {}
     local tokens = editor:GetTokenList()
+    local strategy = tonumber(ide.config.acandtip.symbols)
+    local tkey = "^"..(strategy == 2 and key:gsub(".", "%1.*"):gsub("%.%*$","") or q(key))
+      :gsub("(%w)", function(s) return s == s:upper() and s or "["..s:lower()..s:upper().."]" end)
     for _, token in ipairs(tokens) do
       if token.fpos and pos and token.fpos > pos then break end
       if token[1] == 'Id' or token[1] == 'Var' then
         local var = token.name
-        if var:find(key, 1, true) == 1
+        if var:find(tkey)
         -- skip the variable formed by what's being typed
         and (not token.fpos or not pos or token.fpos < pos-#key) then
           -- if it's a global variable, store in the auto-complete list,
           -- but if it's local, store separately as it needs to be checked
           table.insert(token.context[var] and vars or apilist, var)
         end
-        context = token.context
+        context = token.context -- keep track of the last (innermost) context
       end
     end
     for _, var in pairs(context and vars or {}) do
@@ -593,7 +610,7 @@ function CreateAutoCompList(editor,key,pos)
   local last = key:match("([%w_]+)%s*$")
   if (last and #last >= (ide.config.acandtip.startat or 2)) then
     last = last:lower()
-    for i,v in ipairs(dynamicwords[last] or {}) do
+    for _, v in ipairs(dynamicwords[last] or {}) do
       -- ignore if word == last and sole user
       if (v:lower() == last and dywordentries[v] == 1) then break end
       table.insert(apilist, v)
@@ -602,13 +619,18 @@ function CreateAutoCompList(editor,key,pos)
 
   local li
   if apilist then
-    if (#rest > 0) then
+    if (#rest > 0 and #apilist > 1) then
       local strategy = ide.config.acandtip.strategy
 
       if (strategy == 2 and #apilist < 128) then
         -- when matching "ret": "ret." < "re.t" < "r.et"
-        local patany = rest:gsub(".", function(c) return "["..c:lower()..c:upper().."](.-)" end)
-        local patcase = rest:gsub(".", function(c) return c.."(.-)" end)
+        -- only do this for the first 32 captures as this is the default in Lua;
+        -- having more captures will trigger "too many captures" error
+        local MAXCAPTURES = 32
+        local patany = rest:gsub("()(.)", function(p,c)
+            return "["..c:lower()..c:upper().."]"..(p<=MAXCAPTURES and "(.-)" or "") end)
+        local patcase = rest:gsub("()(.)", function(p,c)
+            return c..(p<=MAXCAPTURES and "(.-)" or "") end)
         local weights = {}
         local penalty = 0.1
         local function weight(str)
